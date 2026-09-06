@@ -44,38 +44,18 @@ fun HomeScreen(
     onLogout: () -> Unit
 ) {
     val selectedLanguage by AppSettings.selectedLanguage.collectAsState()
-    var showLanguageMenu by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
             VedlysTopBar(
                 title = getHomeString("title", selectedLanguage),
                 actions = {
-                    Box {
-                        TextButton(onClick = { showLanguageMenu = true }) {
-                            Text(
-                                text = selectedLanguage.code,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                style = MaterialTheme.typography.titleMedium
-                            )
-                        }
-                        DropdownMenu(
-                            expanded = showLanguageMenu,
-                            onDismissRequest = { showLanguageMenu = false }
-                        ) {
-                            AppLanguage.values().forEach { lang ->
-                                DropdownMenuItem(
-                                    text = { Text(lang.displayName) },
-                                    onClick = {
-                                        AppSettings.setLanguage(lang)
-                                        showLanguageMenu = false
-                                    }
-                                )
-                            }
-                        }
-                    }
                     IconButton(onClick = onLogout) {
-                        Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = getHomeString("logout", selectedLanguage), tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                        Icon(
+                            Icons.AutoMirrored.Filled.Logout,
+                            contentDescription = getHomeString("logout", selectedLanguage),
+                            tint = MaterialTheme.colorScheme.onSurface
+                        )
                     }
                 }
             )

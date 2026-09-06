@@ -19,15 +19,9 @@ import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.foundation.Image
 import androidx.compose.ui.window.Dialog
-import java.net.URL
-import javax.net.ssl.HttpsURLConnection
-import javax.net.ssl.SSLContext
-import javax.net.ssl.TrustManager
-import javax.net.ssl.X509TrustManager
-import java.security.cert.X509Certificate
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import com.suprogramuota_visata.vedlys.utils.decodeImageByteArray
+import com.suprogramuota_visata.vedlys.ui.components.ImageAttributeField
+import com.suprogramuota_visata.vedlys.ui.components.ImagePreviewDialog
+import com.suprogramuota_visata.vedlys.utils.ImageHelper
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.snapshotFlow
@@ -507,11 +501,7 @@ fun TypesScreen(
                                 it.value?.contains("\"img_format\"") == true ||
                                 (it.value?.contains("\"id\"") == true && it.value?.contains("-") == true)
                             }?.value
-                            val imgUuid: String? = if (!rawJson.isNullOrBlank()) {
-                                Regex("\"id\"\\s*:\\s*\"([^\"]+)\"").find(rawJson)?.groupValues?.getOrNull(1)
-                            } else {
-                                null
-                            }
+                            val imgUuid: String? = ImageHelper.extractImageUuid(rawJson)
 
                             TypeRow(
                                 item = item,
@@ -602,6 +592,7 @@ fun TypesScreen(
         if (previewImageUuid != null) {
             ImagePreviewDialog(
                 imageUuid = previewImageUuid!!,
+                apiClient = apiClient,
                 onDismiss = { previewImageUuid = null }
             )
         }
@@ -698,101 +689,6 @@ private fun TypeRow(
                         contentDescription = getTypesString("delete", language),
                         tint = MaterialTheme.colorScheme.error
                     )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun ImagePreviewDialog(
-    imageUuid: String,
-    onDismiss: () -> Unit
-) {
-    var imageBitmap by remember { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
-    var isLoading by remember { mutableStateOf(true) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
-
-    LaunchedEffect(imageUuid) {
-        withContext(Dispatchers.IO) {
-            try {
-                val url = "https://localhost:8081/images/$imageUuid"
-                val conn = (URL(url).openConnection() as HttpsURLConnection).apply {
-                    val trustAllCerts = arrayOf<TrustManager>(object : X509TrustManager {
-                        override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
-                        override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
-                        override fun getAcceptedIssuers(): Array<X509Certificate> = emptyArray()
-                    })
-                    val sc = SSLContext.getInstance("TLS")
-                    sc.init(null, trustAllCerts, java.security.SecureRandom())
-                    sslSocketFactory = sc.socketFactory
-                    hostnameVerifier = javax.net.ssl.HostnameVerifier { _, _ -> true }
-                    requestMethod = "GET"
-                    connectTimeout = 7000
-                    readTimeout = 7000
-                }
-                if (conn.responseCode == 200) {
-                    val bytes = conn.inputStream.use { it.readBytes() }
-                    imageBitmap = decodeImageByteArray(bytes)
-                } else {
-                    errorMessage = "Nepavyko užkrauti nuotraukos (HTTP ${conn.responseCode})"
-                }
-            } catch (e: Exception) {
-                errorMessage = "Klaida: ${e.message}"
-            } finally {
-                isLoading = false
-            }
-        }
-    }
-
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
-    ) {
-        Surface(
-            modifier = Modifier.fillMaxWidth(0.85f).fillMaxHeight(0.85f),
-            shape = RoundedCornerShape(16.dp),
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 8.dp
-        ) {
-            Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "Nuotraukos peržiūra",
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold
-                    )
-                    IconButton(onClick = onDismiss) {
-                        Icon(
-                            Icons.Default.Close,
-                            contentDescription = "Uždaryti",
-                            tint = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                }
-                Spacer(modifier = Modifier.height(16.dp))
-                Box(
-                    modifier = Modifier.fillMaxSize().weight(1f),
-                    contentAlignment = Alignment.Center
-                ) {
-                    when {
-                        isLoading -> CircularProgressIndicator()
-                        errorMessage != null -> Text(
-                            text = errorMessage ?: "",
-                            color = MaterialTheme.colorScheme.error
-                        )
-                        imageBitmap != null -> {
-                            Image(
-                                bitmap = imageBitmap!!,
-                                contentDescription = "Nuotrauka",
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        }
-                    }
                 }
             }
         }
@@ -1055,13 +951,13 @@ internal fun TypeEditorDialog(
         loadTemplates(typeStr)
     }
 
-    LaunchedEffect(selectedTemplateId) {
+    LaunchedEffect(selectedTemplateId, templates) {
         localTypeQueries.clear()
-        if (initial == null) {
-            attributes.clear()
-            if (selectedTemplateId != null) {
-                val tpl = templates.find { it.id == selectedTemplateId }
-                if (tpl != null) {
+        if (selectedTemplateId != null) {
+            val tpl = templates.find { it.id == selectedTemplateId }
+            if (tpl != null) {
+                if (initial == null) {
+                    attributes.clear()
                     tpl.attributes.forEach { ext ->
                         val valToUse = ext.defaultValue ?: ""
                         attributes.add(
@@ -1080,6 +976,21 @@ internal fun TypeEditorDialog(
                             "Brūkšninis kodas" -> if (barcode.isEmpty()) barcode = valToUse
                             "Matavimo vienetas" -> if (baseUnit.isEmpty()) baseUnit = valToUse
                             "Konvertavimo koeficientas" -> if (conversionFactor.isEmpty() || conversionFactor == "1.0") conversionFactor = valToUse.ifEmpty { "1.0" }
+                        }
+                    }
+                } else {
+                    tpl.attributes.forEach { ext ->
+                        if (attributes.none { it.name == ext.name }) {
+                            attributes.add(
+                                AttributeDTO(
+                                    name = ext.name,
+                                    attributeType = ext.attributeType,
+                                    validate = ext.validateRule,
+                                    value = ext.defaultValue ?: "",
+                                    validations = ext.validations,
+                                    tag = ext.tag
+                                )
+                            )
                         }
                     }
                 }
@@ -1736,7 +1647,19 @@ internal fun TypeEditorDialog(
                                 val fieldLabel = "${attr.name} (${attr.attributeType})"
 
                                 Box(modifier = Modifier.weight(1f)) {
-                                    if (attr.attributeType == "BOOLEAN") {
+                                    if (attr.attributeType == "JSON_STRING") {
+                                        ImageAttributeField(
+                                            label = fieldLabel,
+                                            value = attr.value,
+                                            apiClient = apiClient,
+                                            language = language,
+                                            onValueChange = { newVal ->
+                                                val updated = attr.copy(value = newVal)
+                                                attributes[index] = updated
+                                                dirtyFields[attr.name] = true
+                                            }
+                                        )
+                                    } else if (attr.attributeType == "BOOLEAN") {
                                         val boolChecked = attr.value.equals("true", ignoreCase = true) || attr.value == "1"
                                         Row(
                                             verticalAlignment = Alignment.CenterVertically,

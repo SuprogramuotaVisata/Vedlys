@@ -14,65 +14,77 @@ enum class AppLanguage(val code: String, val displayName: String) {
 }
 
 object AppSettings {
-    private val prefs = Preferences.userNodeForPackage(AppSettings::class.java)
+    private val prefs: Preferences? = try {
+        Preferences.userNodeForPackage(AppSettings::class.java)
+    } catch (e: Exception) {
+        null
+    }
     
-    private val _isDarkMode = MutableStateFlow(prefs.getBoolean("isDarkMode", true))
+    private val _isDarkMode = MutableStateFlow(prefs?.getBoolean("isDarkMode", true) ?: true)
     val isDarkMode: StateFlow<Boolean> = _isDarkMode.asStateFlow()
     
-    private val _isNotificationSoundEnabled = MutableStateFlow(prefs.getBoolean("isNotificationSoundEnabled", true))
+    private val _isNotificationSoundEnabled = MutableStateFlow(prefs?.getBoolean("isNotificationSoundEnabled", true) ?: true)
     val isNotificationSoundEnabled: StateFlow<Boolean> = _isNotificationSoundEnabled.asStateFlow()
     
     private val _selectedFontSize = MutableStateFlow(
-        AppFontSize.valueOf(prefs.get("selectedFontSize", AppFontSize.Medium.name))
+        try {
+            AppFontSize.valueOf(prefs?.get("selectedFontSize", AppFontSize.Medium.name) ?: AppFontSize.Medium.name)
+        } catch (e: Exception) {
+            AppFontSize.Medium
+        }
     )
     val selectedFontSize: StateFlow<AppFontSize> = _selectedFontSize.asStateFlow()
 
     private val _selectedLanguage = MutableStateFlow(
-        AppLanguage.valueOf(prefs.get("selectedLanguage", AppLanguage.LT.name))
+        try {
+            AppLanguage.valueOf(prefs?.get("selectedLanguage", AppLanguage.LT.name) ?: AppLanguage.LT.name)
+        } catch (e: Exception) {
+            AppLanguage.LT
+        }
     )
     val selectedLanguage: StateFlow<AppLanguage> = _selectedLanguage.asStateFlow()
 
     private val _terminalId = MutableStateFlow(
-        prefs.get("terminalId", null) ?: UUID.randomUUID().toString().take(8).also {
-            prefs.put("terminalId", it)
+        prefs?.get("terminalId", null) ?: UUID.randomUUID().toString().take(8).also {
+            prefs?.put("terminalId", it)
         }
     )
     val terminalId: StateFlow<String> = _terminalId.asStateFlow()
     
     private val _readMessageIds = MutableStateFlow(
-        prefs.get("readMessageIds", "")?.split(",")?.filter { it.isNotBlank() }?.toSet() ?: emptySet()
+        prefs?.get("readMessageIds", "")?.split(",")?.filter { it.isNotBlank() }?.toSet() ?: emptySet()
     )
     val readMessageIds: StateFlow<Set<String>> = _readMessageIds.asStateFlow()
     
-    private val _paginationLimit = MutableStateFlow(prefs.getInt("paginationLimit", 50))
+    private val _paginationLimit = MutableStateFlow(prefs?.getInt("paginationLimit", 50) ?: 50)
     val paginationLimit: StateFlow<Int> = _paginationLimit.asStateFlow()
 
-    private val _allowCompletedDocumentEditing = MutableStateFlow(prefs.getBoolean("allowCompletedDocumentEditing", false))
+    private val _allowCompletedDocumentEditing = MutableStateFlow(prefs?.getBoolean("allowCompletedDocumentEditing", false) ?: false)
     val allowCompletedDocumentEditing: StateFlow<Boolean> = _allowCompletedDocumentEditing.asStateFlow()
 
-    private val _allowEditingOtherDevicesRecords = MutableStateFlow(prefs.getBoolean("allowEditingOtherDevicesRecords", false))
+    private val _allowEditingOtherDevicesRecords = MutableStateFlow(prefs?.getBoolean("allowEditingOtherDevicesRecords", false) ?: false)
     val allowEditingOtherDevicesRecords: StateFlow<Boolean> = _allowEditingOtherDevicesRecords.asStateFlow()
 
-    private val _allowEditingOtherUsersRecords = MutableStateFlow(prefs.getBoolean("allowEditingOtherUsersRecords", false))
+    private val _allowEditingOtherUsersRecords = MutableStateFlow(prefs?.getBoolean("allowEditingOtherUsersRecords", false) ?: false)
     val allowEditingOtherUsersRecords: StateFlow<Boolean> = _allowEditingOtherUsersRecords.asStateFlow()
     
     fun setDarkMode(enabled: Boolean) {
-        prefs.putBoolean("isDarkMode", enabled)
+        prefs?.putBoolean("isDarkMode", enabled)
         _isDarkMode.value = enabled
     }
 
     fun setAllowCompletedDocumentEditing(enabled: Boolean) {
-        prefs.putBoolean("allowCompletedDocumentEditing", enabled)
+        prefs?.putBoolean("allowCompletedDocumentEditing", enabled)
         _allowCompletedDocumentEditing.value = enabled
     }
 
     fun setAllowEditingOtherDevicesRecords(enabled: Boolean) {
-        prefs.putBoolean("allowEditingOtherDevicesRecords", enabled)
+        prefs?.putBoolean("allowEditingOtherDevicesRecords", enabled)
         _allowEditingOtherDevicesRecords.value = enabled
     }
 
     fun setAllowEditingOtherUsersRecords(enabled: Boolean) {
-        prefs.putBoolean("allowEditingOtherUsersRecords", enabled)
+        prefs?.putBoolean("allowEditingOtherUsersRecords", enabled)
         _allowEditingOtherUsersRecords.value = enabled
     }
 
@@ -113,94 +125,94 @@ object AppSettings {
     }
 
     fun setNotificationSound(enabled: Boolean) {
-        prefs.putBoolean("isNotificationSoundEnabled", enabled)
+        prefs?.putBoolean("isNotificationSoundEnabled", enabled)
         _isNotificationSoundEnabled.value = enabled
     }
 
     fun setFontSize(size: AppFontSize) {
-        prefs.put("selectedFontSize", size.name)
+        prefs?.put("selectedFontSize", size.name)
         _selectedFontSize.value = size
     }
     
     fun setLanguage(language: AppLanguage) {
-        prefs.put("selectedLanguage", language.name)
+        prefs?.put("selectedLanguage", language.name)
         _selectedLanguage.value = language
     }
     
     fun setPaginationLimit(limit: Int) {
-        prefs.putInt("paginationLimit", limit)
+        prefs?.putInt("paginationLimit", limit)
         _paginationLimit.value = limit
     }
     
     fun addReadMessageId(id: String) {
         val newSet = _readMessageIds.value.toMutableSet().apply { add(id) }
-        prefs.put("readMessageIds", newSet.joinToString(","))
+        prefs?.put("readMessageIds", newSet.joinToString(","))
         _readMessageIds.value = newSet
     }
     
     fun addReadMessageIds(ids: List<String>) {
         val newSet = _readMessageIds.value.toMutableSet().apply { addAll(ids) }
-        prefs.put("readMessageIds", newSet.joinToString(","))
+        prefs?.put("readMessageIds", newSet.joinToString(","))
         _readMessageIds.value = newSet
     }
 
     fun isImportAiEnabled(format: String): Boolean {
         val defaultValue = format.lowercase() == "pdf"
-        return prefs.getBoolean("importAi_${format.lowercase()}", defaultValue)
+        return prefs?.getBoolean("importAi_${format.lowercase()}", defaultValue) ?: defaultValue
     }
 
     fun setImportAiEnabled(format: String, enabled: Boolean) {
-        prefs.putBoolean("importAi_${format.lowercase()}", enabled)
+        prefs?.putBoolean("importAi_${format.lowercase()}", enabled)
     }
 
-    private val _isLicensingTermsAccepted = MutableStateFlow(prefs.getBoolean("isLicensingTermsAccepted", false))
+    private val _isLicensingTermsAccepted = MutableStateFlow(prefs?.getBoolean("isLicensingTermsAccepted", false) ?: false)
     val isLicensingTermsAccepted: StateFlow<Boolean> = _isLicensingTermsAccepted.asStateFlow()
 
     fun setLicensingTermsAccepted(accepted: Boolean) {
-        prefs.putBoolean("isLicensingTermsAccepted", accepted)
+        prefs?.putBoolean("isLicensingTermsAccepted", accepted)
         _isLicensingTermsAccepted.value = accepted
     }
 
-    private val _reqName = MutableStateFlow(prefs.get("reqName", ""))
+    private val _reqName = MutableStateFlow(prefs?.get("reqName", "") ?: "")
     val reqName: StateFlow<String> = _reqName.asStateFlow()
     
-    private val _reqCode = MutableStateFlow(prefs.get("reqCode", ""))
+    private val _reqCode = MutableStateFlow(prefs?.get("reqCode", "") ?: "")
     val reqCode: StateFlow<String> = _reqCode.asStateFlow()
     
-    private val _reqVatCode = MutableStateFlow(prefs.get("reqVatCode", ""))
+    private val _reqVatCode = MutableStateFlow(prefs?.get("reqVatCode", "") ?: "")
     val reqVatCode: StateFlow<String> = _reqVatCode.asStateFlow()
     
-    private val _reqAddress = MutableStateFlow(prefs.get("reqAddress", ""))
+    private val _reqAddress = MutableStateFlow(prefs?.get("reqAddress", "") ?: "")
     val reqAddress: StateFlow<String> = _reqAddress.asStateFlow()
     
-    private val _reqBankAccount = MutableStateFlow(prefs.get("reqBankAccount", ""))
+    private val _reqBankAccount = MutableStateFlow(prefs?.get("reqBankAccount", "") ?: "")
     val reqBankAccount: StateFlow<String> = _reqBankAccount.asStateFlow()
     
-    private val _reqBankSwift = MutableStateFlow(prefs.get("reqBankSwift", ""))
+    private val _reqBankSwift = MutableStateFlow(prefs?.get("reqBankSwift", "") ?: "")
     val reqBankSwift: StateFlow<String> = _reqBankSwift.asStateFlow()
     
     fun setReqName(value: String) {
-        prefs.put("reqName", value)
+        prefs?.put("reqName", value)
         _reqName.value = value
     }
     fun setReqCode(value: String) {
-        prefs.put("reqCode", value)
+        prefs?.put("reqCode", value)
         _reqCode.value = value
     }
     fun setReqVatCode(value: String) {
-        prefs.put("reqVatCode", value)
+        prefs?.put("reqVatCode", value)
         _reqVatCode.value = value
     }
     fun setReqAddress(value: String) {
-        prefs.put("reqAddress", value)
+        prefs?.put("reqAddress", value)
         _reqAddress.value = value
     }
     fun setReqBankAccount(value: String) {
-        prefs.put("reqBankAccount", value)
+        prefs?.put("reqBankAccount", value)
         _reqBankAccount.value = value
     }
     fun setReqBankSwift(value: String) {
-        prefs.put("reqBankSwift", value)
+        prefs?.put("reqBankSwift", value)
         _reqBankSwift.value = value
     }
 
@@ -488,33 +500,33 @@ object AppSettings {
         }
     }
 
-    private val _docSeriesPrefixFinancial = MutableStateFlow(prefs.get("docSeriesPrefix_Financial", "FIN-"))
+    private val _docSeriesPrefixFinancial = MutableStateFlow(prefs?.get("docSeriesPrefix_Financial", "FIN-") ?: "FIN-")
     val docSeriesPrefixFinancial: StateFlow<String> = _docSeriesPrefixFinancial.asStateFlow()
 
-    private val _docSeriesNextNumberFinancial = MutableStateFlow(prefs.getInt("docSeriesNextNumber_Financial", 1))
+    private val _docSeriesNextNumberFinancial = MutableStateFlow(prefs?.getInt("docSeriesNextNumber_Financial", 1) ?: 1)
     val docSeriesNextNumberFinancial: StateFlow<Int> = _docSeriesNextNumberFinancial.asStateFlow()
 
-    private val _docSeriesPrefixOperational = MutableStateFlow(prefs.get("docSeriesPrefix_Operational", "OPR-"))
+    private val _docSeriesPrefixOperational = MutableStateFlow(prefs?.get("docSeriesPrefix_Operational", "OPR-") ?: "OPR-")
     val docSeriesPrefixOperational: StateFlow<String> = _docSeriesPrefixOperational.asStateFlow()
 
-    private val _docSeriesNextNumberOperational = MutableStateFlow(prefs.getInt("docSeriesNextNumber_Operational", 1))
+    private val _docSeriesNextNumberOperational = MutableStateFlow(prefs?.getInt("docSeriesNextNumber_Operational", 1) ?: 1)
     val docSeriesNextNumberOperational: StateFlow<Int> = _docSeriesNextNumberOperational.asStateFlow()
 
-    private val _docSeriesPrefixDelivery = MutableStateFlow(prefs.get("docSeriesPrefix_Delivery", "DEL-"))
+    private val _docSeriesPrefixDelivery = MutableStateFlow(prefs?.get("docSeriesPrefix_Delivery", "DEL-") ?: "DEL-")
     val docSeriesPrefixDelivery: StateFlow<String> = _docSeriesPrefixDelivery.asStateFlow()
 
-    private val _docSeriesNextNumberDelivery = MutableStateFlow(prefs.getInt("docSeriesNextNumber_Delivery", 1))
+    private val _docSeriesNextNumberDelivery = MutableStateFlow(prefs?.getInt("docSeriesNextNumber_Delivery", 1) ?: 1)
     val docSeriesNextNumberDelivery: StateFlow<Int> = _docSeriesNextNumberDelivery.asStateFlow()
 
-    private val _docSeriesPrefixCRM = MutableStateFlow(prefs.get("docSeriesPrefix_CRM", "CRM-"))
+    private val _docSeriesPrefixCRM = MutableStateFlow(prefs?.get("docSeriesPrefix_CRM", "CRM-") ?: "CRM-")
     val docSeriesPrefixCRM: StateFlow<String> = _docSeriesPrefixCRM.asStateFlow()
 
-    private val _docSeriesNextNumberCRM = MutableStateFlow(prefs.getInt("docSeriesNextNumber_CRM", 1))
+    private val _docSeriesNextNumberCRM = MutableStateFlow(prefs?.getInt("docSeriesNextNumber_CRM", 1) ?: 1)
     val docSeriesNextNumberCRM: StateFlow<Int> = _docSeriesNextNumberCRM.asStateFlow()
 
     fun setDocSeriesPrefix(group: String, value: String) {
         val cleanGroup = group.trim()
-        prefs.put("docSeriesPrefix_$cleanGroup", value)
+        prefs?.put("docSeriesPrefix_$cleanGroup", value)
         when (cleanGroup) {
             "Financial" -> _docSeriesPrefixFinancial.value = value
             "Operational" -> _docSeriesPrefixOperational.value = value
@@ -525,7 +537,7 @@ object AppSettings {
 
     fun setDocSeriesNextNumber(group: String, value: Int) {
         val cleanGroup = group.trim()
-        prefs.putInt("docSeriesNextNumber_$cleanGroup", value)
+        prefs?.putInt("docSeriesNextNumber_$cleanGroup", value)
         when (cleanGroup) {
             "Financial" -> _docSeriesNextNumberFinancial.value = value
             "Operational" -> _docSeriesNextNumberOperational.value = value

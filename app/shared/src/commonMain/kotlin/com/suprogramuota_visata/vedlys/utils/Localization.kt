@@ -7,13 +7,20 @@ object Localization {
     private val bundles = mutableMapOf<AppLanguage, ResourceBundle>()
 
     fun getString(prefix: String, key: String, language: AppLanguage): String {
-        val bundle = bundles.getOrPut(language) {
-            val locale = when (language) {
-                AppLanguage.LT -> Locale("lt", "LT")
-                AppLanguage.EN -> Locale("en", "US")
+        val bundle = try {
+            bundles.getOrPut(language) {
+                val locale = when (language) {
+                    AppLanguage.LT -> Locale("lt", "LT")
+                    AppLanguage.EN -> Locale("en", "US")
+                }
+                ResourceBundle.getBundle("strings", locale, UTF8Control())
             }
-            ResourceBundle.getBundle("strings", locale, UTF8Control())
+        } catch (e: Exception) {
+            null
         }
+
+        if (bundle == null) return key
+
         val fullKey = "${prefix}_$key"
         return try {
             bundle.getString(fullKey)

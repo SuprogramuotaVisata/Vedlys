@@ -28,6 +28,9 @@ import com.suprogramuota_visata.vedlys.ui.components.SelectAllOutlinedTextField
 import com.suprogramuota_visata.vedlys.ui.components.ErrorBanner
 import com.suprogramuota_visata.vedlys.ui.components.LoadingOverlay
 import com.suprogramuota_visata.vedlys.ui.components.VedlysTopBar
+import com.suprogramuota_visata.vedlys.ui.components.ImageAttributeField
+import com.suprogramuota_visata.vedlys.ui.components.ImagePreviewDialog
+import com.suprogramuota_visata.vedlys.utils.ImageHelper
 import com.suprogramuota_visata.vedlys.viewmodel.TaskDetailViewModel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
@@ -929,6 +932,7 @@ private fun TransactionDetailsSection(
                             detail = detail,
                             isReadOnly = isReadOnly,
                             isHighlighted = isHighlighted,
+                            apiClient = apiClient,
                             onOpenTask = onOpenTask,
                             onEditClick = { onEditClick(detail) },
                             onDelete = { viewModel.removeDetail(detail.sequenceId) },
@@ -1792,7 +1796,42 @@ private fun TransactionHeaderCard(
                             } else null
 
                             Box(modifier = Modifier.weight(1f)) {
-                                if (isReadOnly) {
+                                if (attr.attributeType == "JSON_STRING") {
+                                    if (isReadOnly) {
+                                        val imgUuid = ImageHelper.extractImageUuid(attr.value)
+                                        if (imgUuid != null) {
+                                            var previewOpen by remember { mutableStateOf(false) }
+                                            IconButton(onClick = { previewOpen = true }) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Visibility,
+                                                    contentDescription = "Nuotrauka",
+                                                    tint = MaterialTheme.colorScheme.primary
+                                                )
+                                            }
+                                            if (previewOpen) {
+                                                ImagePreviewDialog(
+                                                    imageUuid = imgUuid,
+                                                    apiClient = apiClient,
+                                                    title = attr.name,
+                                                    onDismiss = { previewOpen = false }
+                                                )
+                                            }
+                                        } else {
+                                            Text("${attr.name}: —", style = MaterialTheme.typography.bodyMedium)
+                                        }
+                                    } else {
+                                        ImageAttributeField(
+                                            label = attr.name,
+                                            value = attr.value,
+                                            apiClient = apiClient,
+                                            language = AppSettings.selectedLanguage.value,
+                                            onValueChange = { newVal ->
+                                                viewModel.updateAttribute(attr.name, attr.attributeType, newVal)
+                                                dirtyFields[attr.name] = true
+                                            }
+                                        )
+                                    }
+                                } else if (isReadOnly) {
                                     Text("${attr.name}: ${attr.value}", style = MaterialTheme.typography.bodyMedium)
                                 } else {
                                     SelectAllOutlinedTextField(
@@ -1842,6 +1881,7 @@ private fun TransactionDetailRow(
     detail: TransactionDetailDTO,
     isReadOnly: Boolean,
     isHighlighted: Boolean,
+    apiClient: ApiSvClient,
     onOpenTask: (String, Int?) -> Unit,
     onEditClick: () -> Unit,
     onDelete: () -> Unit,
@@ -1944,6 +1984,31 @@ private fun TransactionDetailRow(
                 }
             } else {
                 Spacer(modifier = Modifier.size(32.dp))
+            }
+
+            // Photo preview button if detail has a photo
+            val photoUuid = detail.attributes.firstNotNullOfOrNull { attr ->
+                if (attr.attributeType == "JSON_STRING" || attr.name.contains("Nuotrauk", ignoreCase = true)) {
+                    ImageHelper.extractImageUuid(attr.value)
+                } else null
+            }
+            if (photoUuid != null) {
+                var showPhotoPreview by remember { mutableStateOf(false) }
+                IconButton(onClick = { showPhotoPreview = true }, modifier = Modifier.size(32.dp)) {
+                    Icon(
+                        imageVector = Icons.Default.Visibility,
+                        contentDescription = "Nuotrauka",
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
+                if (showPhotoPreview) {
+                    ImagePreviewDialog(
+                        imageUuid = photoUuid,
+                        apiClient = apiClient,
+                        title = detail.description,
+                        onDismiss = { showPhotoPreview = false }
+                    )
+                }
             }
 
             // 6. Action buttons
@@ -2766,15 +2831,27 @@ private fun TransactionDetailDialog(
                     Text("Papildomi atributai", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                     customAttrsList.forEach { attr ->
                         val currentVal = customAttributeValues[attr.name] ?: ""
-                        OutlinedTextField(
-                            value = currentVal,
-                            onValueChange = { newVal ->
-                                customAttributeValues[attr.name] = newVal
-                            },
-                            label = { Text(attr.name) },
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true
-                        )
+                        if (attr.attributeType == "JSON_STRING") {
+                            ImageAttributeField(
+                                label = "${attr.name} (${attr.attributeType})",
+                                value = currentVal,
+                                apiClient = apiClient,
+                                language = language,
+                                onValueChange = { newVal ->
+                                    customAttributeValues[attr.name] = newVal
+                                }
+                            )
+                        } else {
+                            OutlinedTextField(
+                                value = currentVal,
+                                onValueChange = { newVal ->
+                                    customAttributeValues[attr.name] = newVal
+                                },
+                                label = { Text(attr.name) },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true
+                            )
+                        }
                     }
                 }
             }

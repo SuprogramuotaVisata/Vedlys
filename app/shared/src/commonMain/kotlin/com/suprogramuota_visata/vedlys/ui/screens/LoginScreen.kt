@@ -31,29 +31,70 @@ fun LoginScreen(
     val viewModel = remember { AuthViewModel(apiClient) }
     DisposableEffect(Unit) { onDispose { viewModel.dispose() } }
 
+    LoginScreenContent(
+        isLoading = viewModel.isLoading,
+        errorMessage = viewModel.errorMessage,
+        initialServerHost = AppSettings.getApiHost(),
+        initialServerPort = AppSettings.getApiPort().toString(),
+        initialServerUseHttps = AppSettings.getUseHttps(),
+        onLogin = { email, password -> viewModel.login(email, password, onLoginSuccess) },
+        onClearError = { viewModel.clearError() },
+        onGoToRegister = onGoToRegister,
+        onGoToSettings = onGoToSettings,
+        onUpdateServerConfig = { host, port, https ->
+            AppSettings.saveServerConfig(host, port, https)
+            apiClient.updateServerConfig(host, port, https)
+        }
+    )
+}
+
+/**
+ * Stateless version of LoginScreen for easier testing and previews.
+ * Resolves the "Write access not allowed during rendering" issue by avoiding
+ * ApiSvClient initialization in Previews.
+ */
+@Composable
+fun LoginScreenContent(
+    isLoading: Boolean,
+    errorMessage: String?,
+    initialServerHost: String,
+    initialServerPort: String,
+    initialServerUseHttps: Boolean,
+    onLogin: (String, String) -> Unit,
+    onClearError: () -> Unit,
+    onGoToRegister: () -> Unit,
+    onGoToSettings: () -> Unit,
+    onUpdateServerConfig: (String, Int, Boolean) -> Unit
+) {
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
 
     var showServerDialog by remember { mutableStateOf(false) }
-    var serverHost by remember { mutableStateOf(AppSettings.getApiHost()) }
-    var serverPort by remember { mutableStateOf(AppSettings.getApiPort().toString()) }
-    var serverUseHttps by remember { mutableStateOf(AppSettings.getUseHttps()) }
+    var serverHost by remember { mutableStateOf(initialServerHost) }
+    var serverPort by remember { mutableStateOf(initialServerPort) }
+    var serverUseHttps by remember { mutableStateOf(initialServerUseHttps) }
     var serverSavedMsg by remember { mutableStateOf<String?>(null) }
 
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        // Settings Gear Icon top right (matching Ciklopas)
-        IconButton(
-            onClick = onGoToSettings,
+        // Top right controls: LanguageSelector and Settings Gear Icon
+        Row(
             modifier = Modifier
                 .align(Alignment.TopEnd)
-                .padding(24.dp)
+                .padding(20.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Icon(
-                imageVector = Icons.Default.Settings,
-                contentDescription = "Nustatymai",
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(32.dp)
-            )
+            com.suprogramuota_visata.vedlys.ui.components.LanguageSelector()
+            IconButton(
+                onClick = onGoToSettings
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Settings,
+                    contentDescription = "Nustatymai",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(28.dp)
+                )
+            }
         }
 
         Card(
@@ -77,8 +118,8 @@ fun LoginScreen(
                 )
                 Spacer(Modifier.height(24.dp))
 
-                viewModel.errorMessage?.let {
-                    ErrorBanner(it, onDismiss = { viewModel.clearError() })
+                errorMessage?.let {
+                    ErrorBanner(it, onDismiss = onClearError)
                     Spacer(Modifier.height(8.dp))
                 }
 
@@ -114,11 +155,11 @@ fun LoginScreen(
                 Spacer(Modifier.height(20.dp))
 
                 Button(
-                    onClick = { viewModel.login(email.trim(), password, onLoginSuccess) },
-                    enabled = !viewModel.isLoading,
+                    onClick = { onLogin(email.trim(), password) },
+                    enabled = !isLoading,
                     modifier = Modifier.fillMaxWidth().height(48.dp)
                 ) {
-                    if (viewModel.isLoading) {
+                    if (isLoading) {
                         CircularProgressIndicator(
                             modifier = Modifier.size(20.dp),
                             strokeWidth = 2.dp,
@@ -131,7 +172,7 @@ fun LoginScreen(
                 Spacer(Modifier.height(8.dp))
                 TextButton(
                     onClick = onGoToRegister,
-                    enabled = !viewModel.isLoading
+                    enabled = !isLoading
                 ) {
                     Text(Messages.LOGIN_NO_ACCOUNT)
                 }
@@ -186,9 +227,8 @@ fun LoginScreen(
                 Button(
                     onClick = {
                         val portNum = serverPort.toIntOrNull() ?: 8081
-                        AppSettings.saveServerConfig(serverHost, portNum, true)
-                        apiClient.updateServerConfig(serverHost, portNum, true)
-                        serverSavedMsg = "Serverio nustatymai išsaugoti (${apiClient.baseUrl})!"
+                        onUpdateServerConfig(serverHost, portNum, serverUseHttps)
+                        serverSavedMsg = "Serverio nustatymai išsaugoti!"
                         showServerDialog = false
                     }
                 ) {
@@ -209,13 +249,18 @@ fun LoginScreen(
 fun LoginScreenPreview() {
     VedlysTheme {
         Surface {
-            LoginScreen(
-                apiClient = ApiSvClient(host = "127.0.0.1", port = 8081, useHttps = false),
-                onLoginSuccess = {},
+            LoginScreenContent(
+                isLoading = false,
+                errorMessage = null,
+                initialServerHost = "127.0.0.1",
+                initialServerPort = "8081",
+                initialServerUseHttps = false,
+                onLogin = { _, _ -> },
+                onClearError = {},
                 onGoToRegister = {},
-                onGoToSettings = {}
+                onGoToSettings = {},
+                onUpdateServerConfig = { _, _, _ -> }
             )
         }
     }
 }
-

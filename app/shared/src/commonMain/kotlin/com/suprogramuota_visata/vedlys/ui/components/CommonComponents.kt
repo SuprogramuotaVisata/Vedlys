@@ -15,9 +15,47 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Language
+import androidx.compose.runtime.*
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
+import com.suprogramuota_visata.vedlys.AppLanguage
+import com.suprogramuota_visata.vedlys.AppSettings
 import com.suprogramuota_visata.vedlys.ui.theme.VedlysTheme
+
+@Composable
+fun LanguageSelector(
+    modifier: Modifier = Modifier,
+    textColor: Color = MaterialTheme.colorScheme.onSurface
+) {
+    val selectedLanguage by AppSettings.selectedLanguage.collectAsState()
+    var showLanguageMenu by remember { mutableStateOf(false) }
+
+    Box(modifier = modifier) {
+        TextButton(onClick = { showLanguageMenu = true }) {
+            Text(
+                text = selectedLanguage.code,
+                color = textColor,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+        }
+        DropdownMenu(
+            expanded = showLanguageMenu,
+            onDismissRequest = { showLanguageMenu = false }
+        ) {
+            AppLanguage.entries.forEach { lang ->
+                DropdownMenuItem(
+                    text = { Text(lang.displayName) },
+                    onClick = {
+                        AppSettings.setLanguage(lang)
+                        showLanguageMenu = false
+                    }
+                )
+            }
+        }
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -25,6 +63,7 @@ fun VedlysTopBar(
     title: String,
     onBack: (() -> Unit)? = null,
     onHome: (() -> Unit)? = null,
+    showLanguageSelector: Boolean = true,
     actions: @Composable RowScope.() -> Unit = {}
 ) {
     TopAppBar(
@@ -36,26 +75,33 @@ fun VedlysTopBar(
             ) 
         },
         navigationIcon = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (onBack != null) {
-                    IconButton(onClick = onBack) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.ArrowBack, 
-                            contentDescription = "Atgal"
-                        )
+            if (onBack != null || onHome != null) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (onBack != null) {
+                        IconButton(onClick = onBack) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.ArrowBack, 
+                                contentDescription = "Atgal"
+                            )
+                        }
                     }
-                }
-                if (onHome != null) {
-                    IconButton(onClick = onHome) {
-                        Icon(
-                            Icons.Default.Home, 
-                            contentDescription = "Pagrindinis"
-                        )
+                    if (onHome != null) {
+                        IconButton(onClick = onHome) {
+                            Icon(
+                                Icons.Default.Home, 
+                                contentDescription = "Pagrindinis"
+                            )
+                        }
                     }
                 }
             }
         },
-        actions = actions,
+        actions = {
+            if (showLanguageSelector) {
+                LanguageSelector()
+            }
+            actions()
+        },
         colors = TopAppBarDefaults.topAppBarColors(
             containerColor = MaterialTheme.colorScheme.surface,
             titleContentColor = MaterialTheme.colorScheme.onSurface,
