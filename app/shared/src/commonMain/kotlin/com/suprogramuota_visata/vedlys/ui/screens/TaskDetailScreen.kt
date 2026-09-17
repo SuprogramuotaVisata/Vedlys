@@ -538,10 +538,19 @@ private fun TransactionDetailsSection(
     var allGroupsList by remember { mutableStateOf<List<TypeDTO>>(emptyList()) }
     var quantityStr by remember { mutableStateOf("1") }
     var matasStr by remember { mutableStateOf("vnt.") }
+    var unitsList by remember { mutableStateOf<List<TypeDTO>>(emptyList()) }
+    var matasDropdownExpanded by remember { mutableStateOf(false) }
     var priceExStr by remember { mutableStateOf("0.0") }
     var vatRateStr by remember { mutableStateOf("21.0") }
     var sumExStr by remember { mutableStateOf("0.0") }
     var sumInStr by remember { mutableStateOf("0.0") }
+
+    LaunchedEffect(Unit) {
+        when (val res = apiClient.typeRepository.getAllByType("UnitSv")) {
+            is ApiResult.Success -> unitsList = res.data ?: emptyList()
+            else -> {}
+        }
+    }
 
     LaunchedEffect(showTypeEditor) {
         if (showTypeEditor && allGroupsList.isEmpty()) {
@@ -781,13 +790,21 @@ private fun TransactionDetailsSection(
                             // 1. Prekė / Paslauga (su slankikliu išskleidžiamojo sąrašo viršuje)
                             SearchableTypeDropdown(
                                 apiClient = apiClient,
-                                typeName = itemKind,
-                                label = if (itemKind == "Product") "Prekė" else "Paslauga",
+                                typeName = if (itemKind in listOf("Service", "ServiceSv")) "ServiceSv" else "ProductSv",
+                                label = if (itemKind in listOf("Product", "ProductSv")) {
+                                    selectedItem?.name?.takeIf { it.isNotBlank() }?.let { "Prekė ($it)" } ?: "Prekė"
+                                } else {
+                                    selectedItem?.name?.takeIf { it.isNotBlank() }?.let { "Paslauga ($it)" } ?: "Paslauga"
+                                },
                                 selectedTypeId = selectedItem?.id,
                                 onSelected = { item ->
                                     selectedItem = item
                                     if (item != null) {
-                                        item.baseUnit?.takeIf { it.isNotBlank() }?.let { matasStr = it }
+                                        val bu = item.baseUnit?.takeIf { it.isNotBlank() }
+                                            ?: item.attributes.find { it.name.contains("Matas", ignoreCase = true) || it.name.contains("Unit", ignoreCase = true) }?.value
+                                        if (!bu.isNullOrBlank()) {
+                                            matasStr = getTranslatedUnitName(bu, bu, com.suprogramuota_visata.vedlys.AppLanguage.LT)
+                                        }
                                         scope.launch {
                                             delay(50)
                                             qtyFocusRequester.requestFocus()
@@ -828,22 +845,68 @@ private fun TransactionDetailsSection(
                                     }
                             )
 
-                            // 3. Matas
-                            SelectAllOutlinedTextField(
-                                value = matasStr,
-                                onValueChange = { matasStr = it },
-                                label = { Text("Matas") },
-                                singleLine = true,
-                                modifier = Modifier
-                                    .weight(0.7f)
-                                    .focusRequester(matasFocusRequester)
-                                    .onPreviewKeyEvent { event ->
-                                        if (event.type == KeyEventType.KeyDown && event.key == Key.Enter) {
-                                            priceFocusRequester.requestFocus()
-                                            true
-                                        } else false
+                            // 3. Matas (pasirinkimas iš matavimo vienetų sąrašo arba laisvas įvedimas)
+                            ExposedDropdownMenuBox(
+                                expanded = matasDropdownExpanded,
+                                onExpandedChange = { matasDropdownExpanded = !matasDropdownExpanded },
+                                modifier = Modifier.weight(0.85f)
+                            ) {
+                                SelectAllOutlinedTextField(
+                                    value = matasStr,
+                                    onValueChange = { 
+                                        matasStr = it
+                                        matasDropdownExpanded = true
+                                    },
+                                    label = { Text("Matas") },
+                                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = matasDropdownExpanded) },
+                                    singleLine = true,
+                                    modifier = Modifier
+                                        .menuAnchor()
+                                        .fillMaxWidth()
+                                        .focusRequester(matasFocusRequester)
+                                        .onPreviewKeyEvent { event ->
+                                            if (event.type == KeyEventType.KeyDown && event.key == Key.Enter) {
+                                                matasDropdownExpanded = false
+                                                priceFocusRequester.requestFocus()
+                                                true
+                                            } else false
+                                        }
+                                )
+                                ExposedDropdownMenu(
+                                    expanded = matasDropdownExpanded,
+                                    onDismissRequest = { matasDropdownExpanded = false }
+                                ) {
+                                    val availableUnits = remember(unitsList) {
+                                        if (unitsList.isNotEmpty()) {
+                                            unitsList.map { u ->
+                                                val shortCode = getTranslatedUnitName(u.code ?: "", u.name, com.suprogramuota_visata.vedlys.AppLanguage.LT)
+                                                val displayLabel = if (u.name.isNotBlank() && !u.name.equals(shortCode, ignoreCase = true)) {
+                                                    "$shortCode (${u.name})"
+                                                } else {
+                                                    shortCode
+                                                }
+                                                shortCode to displayLabel
+                                            }
+                                        } else {
+                                            listOf("vnt.", "kg", "l", "m", "kompl.", "val.", "d.").map { it to it }
+                                        }
                                     }
-                            )
+
+                                    availableUnits.forEach { (shortCode, displayLabel) ->
+                                        DropdownMenuItem(
+                                            text = { Text(displayLabel) },
+                                            onClick = {
+                                                matasStr = shortCode
+                                                matasDropdownExpanded = false
+                                                scope.launch {
+                                                    delay(50)
+                                                    priceFocusRequester.requestFocus()
+                                                }
+                                            }
+                                        )
+                                    }
+                                }
+                            }
 
                             // 4. Kaina be PVM
                             SelectAllOutlinedTextField(
@@ -2371,6 +2434,7 @@ private fun TransactionDetailDialog(
     
     var warehousesList by remember { mutableStateOf<List<TypeDTO>>(emptyList()) }
     var divisionsList by remember { mutableStateOf<List<TypeDTO>>(emptyList()) }
+    var unitsList by remember { mutableStateOf<List<TypeDTO>>(emptyList()) }
     
     LaunchedEffect(Unit) {
         when (val res = apiClient.typeRepository.getAllByType("Warehouse")) {
@@ -2381,6 +2445,10 @@ private fun TransactionDetailDialog(
             is ApiResult.Success -> divisionsList = res.data ?: emptyList()
             is ApiResult.Error -> {}
         }
+        when (val res = apiClient.typeRepository.getAllByType("UnitSv")) {
+            is ApiResult.Success -> unitsList = res.data ?: emptyList()
+            is ApiResult.Error -> {}
+        }
     }
 
     var itemsList by remember { mutableStateOf<List<TypeDTO>>(emptyList()) }
@@ -2389,7 +2457,7 @@ private fun TransactionDetailDialog(
 
     LaunchedEffect(itemType) {
         isLoadingItems = true
-        val typeName = if (itemType == "Prekė") "Product" else "Service"
+        val typeName = if (itemType == "Prekė") "ProductSv" else "ServiceSv"
         when (val result = apiClient.typeRepository.getAllByType(typeName)) {
             is ApiResult.Success -> {
                 itemsList = result.data ?: emptyList()
@@ -2626,14 +2694,53 @@ private fun TransactionDetailDialog(
                             modifier = Modifier.weight(1f),
                             singleLine = true
                         )
-                        OutlinedTextField(
-                            value = matasStr,
-                            onValueChange = {},
-                            readOnly = true,
-                            label = { Text("Matas") },
-                            modifier = Modifier.weight(1f),
-                            singleLine = true
-                        )
+                        var dialogMatasExpanded by remember { mutableStateOf(false) }
+                        ExposedDropdownMenuBox(
+                            expanded = dialogMatasExpanded,
+                            onExpandedChange = { dialogMatasExpanded = !dialogMatasExpanded },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            OutlinedTextField(
+                                value = matasStr,
+                                onValueChange = { 
+                                    matasStr = it 
+                                    dialogMatasExpanded = true
+                                },
+                                label = { Text("Matas") },
+                                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = dialogMatasExpanded) },
+                                modifier = Modifier.menuAnchor().fillMaxWidth(),
+                                singleLine = true
+                            )
+                            ExposedDropdownMenu(
+                                expanded = dialogMatasExpanded,
+                                onDismissRequest = { dialogMatasExpanded = false }
+                            ) {
+                                val availableUnits = remember(unitsList) {
+                                    if (unitsList.isNotEmpty()) {
+                                        unitsList.map { u ->
+                                            val shortCode = getTranslatedUnitName(u.code ?: "", u.name, language)
+                                            val displayLabel = if (u.name.isNotBlank() && !u.name.equals(shortCode, ignoreCase = true)) {
+                                                "$shortCode (${u.name})"
+                                            } else {
+                                                shortCode
+                                            }
+                                            shortCode to displayLabel
+                                        }
+                                    } else {
+                                        listOf("vnt.", "kg", "l", "m", "kompl.", "val.", "d.").map { it to it }
+                                    }
+                                }
+                                availableUnits.forEach { (shortCode, displayLabel) ->
+                                    DropdownMenuItem(
+                                        text = { Text(displayLabel) },
+                                        onClick = {
+                                            matasStr = shortCode
+                                            dialogMatasExpanded = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
 

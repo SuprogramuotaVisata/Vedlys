@@ -105,9 +105,9 @@ fun NotificationsScreen(
                         maxLines = 3,
                         modifier = Modifier.weight(1f),
                         shape = RoundedCornerShape(12.dp),
-                        colors = TextFieldDefaults.colors(
-                            focusedIndicatorColor = priorityColor,
-                            unfocusedIndicatorColor = priorityColor.copy(alpha = 0.5f),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = priorityColor,
+                            unfocusedBorderColor = priorityColor.copy(alpha = 0.6f),
                             focusedContainerColor = MaterialTheme.colorScheme.surface,
                             unfocusedContainerColor = MaterialTheme.colorScheme.surface
                         )
@@ -125,10 +125,12 @@ fun NotificationsScreen(
                                 trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = priorityExpanded) },
                                 modifier = Modifier.width(130.dp).menuAnchor(),
                                 shape = RoundedCornerShape(12.dp),
-                                textStyle = MaterialTheme.typography.bodySmall.copy(color = priorityColor),
-                                colors = TextFieldDefaults.colors(
-                                    focusedIndicatorColor = priorityColor,
-                                    unfocusedIndicatorColor = priorityColor.copy(alpha = 0.5f),
+                                textStyle = MaterialTheme.typography.bodySmall.copy(color = priorityColor, fontWeight = FontWeight.SemiBold),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = priorityColor,
+                                    unfocusedBorderColor = priorityColor.copy(alpha = 0.6f),
+                                    focusedContainerColor = MaterialTheme.colorScheme.surface,
+                                    unfocusedContainerColor = MaterialTheme.colorScheme.surface
                                 )
                             )
                             ExposedDropdownMenu(
@@ -157,10 +159,12 @@ fun NotificationsScreen(
                                 trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = receiverExpanded) },
                                 modifier = Modifier.width(130.dp).menuAnchor(),
                                 shape = RoundedCornerShape(12.dp),
-                                textStyle = MaterialTheme.typography.bodySmall.copy(color = priorityColor),
-                                colors = TextFieldDefaults.colors(
-                                    focusedIndicatorColor = priorityColor,
-                                    unfocusedIndicatorColor = priorityColor.copy(alpha = 0.5f),
+                                textStyle = MaterialTheme.typography.bodySmall.copy(color = priorityColor, fontWeight = FontWeight.SemiBold),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = priorityColor,
+                                    unfocusedBorderColor = priorityColor.copy(alpha = 0.6f),
+                                    focusedContainerColor = MaterialTheme.colorScheme.surface,
+                                    unfocusedContainerColor = MaterialTheme.colorScheme.surface
                                 )
                             )
                             ExposedDropdownMenu(
@@ -190,7 +194,8 @@ fun NotificationsScreen(
                             modifier = Modifier.height(50.dp).width(130.dp),
                             shape = RoundedCornerShape(12.dp),
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = priorityColor 
+                                containerColor = priorityColor,
+                                contentColor = if (selectedPriority == "WARNING" || selectedPriority == "REMINDER") Color.Black else Color.White
                             )
                         ) {
                             Icon(Icons.AutoMirrored.Filled.Send, contentDescription = getNotificationsString("send", language))
@@ -274,9 +279,12 @@ private fun ReceivedBubble(msg: ChatMessage, language: AppLanguage, onDismiss: (
         "REMINDER" -> MaterialTheme.colorScheme.surfaceVariant to MaterialTheme.colorScheme.onSurfaceVariant
         else -> MaterialTheme.colorScheme.surfaceVariant to MaterialTheme.colorScheme.onSurfaceVariant
     }
-    val borderStroke = if (msg.priority.name == "REMINDER") {
-        androidx.compose.foundation.BorderStroke(2.dp, Color(0xFF00FFFF)) // Cyber Cyan border
-    } else null
+    val borderStroke = when (msg.priority.name) {
+        "REMINDER" -> androidx.compose.foundation.BorderStroke(2.dp, Color(0xFF00FFFF)) // Cyber Cyan border
+        "URGENT" -> androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFB3261E))
+        "WARNING" -> androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFF9900))
+        else -> null
+    }
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {
         Surface(
             color = bg,
@@ -291,7 +299,7 @@ private fun ReceivedBubble(msg: ChatMessage, language: AppLanguage, onDismiss: (
                         "${getNotificationsString("from", language)} ${msg.senderId}",
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.Bold,
-                        color = fg.copy(alpha = 0.8f),
+                        color = fg.copy(alpha = 0.85f),
                         modifier = Modifier.weight(1f)
                     )
                     if (msg.priority.name != "NORMAL") {
@@ -299,11 +307,11 @@ private fun ReceivedBubble(msg: ChatMessage, language: AppLanguage, onDismiss: (
                         PriorityBadge(msg.priority.name, fg)
                     }
                     IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
-                        Icon(Icons.Default.Check, contentDescription = getNotificationsString("mark_read", language), modifier = Modifier.size(20.dp))
+                        Icon(Icons.Default.Check, contentDescription = getNotificationsString("mark_read", language), tint = fg, modifier = Modifier.size(20.dp))
                     }
                 }
                 Spacer(Modifier.height(4.dp))
-                Text(msg.message, style = MaterialTheme.typography.bodyMedium)
+                Text(msg.message, style = MaterialTheme.typography.bodyMedium, color = fg)
             }
         }
     }
@@ -311,39 +319,55 @@ private fun ReceivedBubble(msg: ChatMessage, language: AppLanguage, onDismiss: (
 
 @Composable
 private fun SentBubble(msg: ChatMessage, language: AppLanguage, onDismiss: () -> Unit) {
-    val borderStroke = if (msg.priority.name == "REMINDER") {
-        androidx.compose.foundation.BorderStroke(2.dp, Color(0xFF00FFFF))
-    } else {
-        androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary)
+    val (bg, fg) = when (msg.priority.name) {
+        "URGENT" -> Color(0xFFB3261E) to Color.White
+        "WARNING" -> Color(0xFFFF9900).copy(alpha = 0.9f) to Color.Black
+        "REMINDER" -> MaterialTheme.colorScheme.primary.copy(alpha = 0.2f) to MaterialTheme.colorScheme.onBackground
+        else -> MaterialTheme.colorScheme.primary.copy(alpha = 0.2f) to MaterialTheme.colorScheme.onBackground
+    }
+
+    val borderStroke = when (msg.priority.name) {
+        "REMINDER" -> androidx.compose.foundation.BorderStroke(2.dp, Color(0xFF00FFFF))
+        "URGENT" -> androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFB3261E))
+        "WARNING" -> androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFF9900))
+        else -> androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary)
     }
 
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
         Surface(
-            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f),
-            contentColor = MaterialTheme.colorScheme.onBackground,
+            color = bg,
+            contentColor = fg,
             shape = RoundedCornerShape(16.dp, 0.dp, 16.dp, 16.dp),
             border = borderStroke,
             modifier = Modifier.widthIn(max = 480.dp)
         ) {
             Column(modifier = Modifier.padding(12.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    val titleColor = when (msg.priority.name) {
+                        "URGENT", "WARNING" -> fg.copy(alpha = 0.85f)
+                        else -> MaterialTheme.colorScheme.primary
+                    }
                     Text(
                         getNotificationsString("you", language),
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary, // Analytics Purple
+                        color = titleColor,
                         modifier = Modifier.weight(1f)
                     )
                     if (msg.priority.name != "NORMAL") {
                         Spacer(Modifier.width(6.dp))
-                        PriorityBadge(msg.priority.name, MaterialTheme.colorScheme.primary)
+                        val badgeFg = when (msg.priority.name) {
+                            "URGENT", "WARNING" -> fg
+                            else -> MaterialTheme.colorScheme.primary
+                        }
+                        PriorityBadge(msg.priority.name, badgeFg)
                     }
                     IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
-                        Icon(Icons.Default.Check, contentDescription = getNotificationsString("mark_read", language), modifier = Modifier.size(20.dp))
+                        Icon(Icons.Default.Check, contentDescription = getNotificationsString("mark_read", language), tint = fg, modifier = Modifier.size(20.dp))
                     }
                 }
                 Spacer(Modifier.height(4.dp))
-                Text(msg.message, style = MaterialTheme.typography.bodyMedium)
+                Text(msg.message, style = MaterialTheme.typography.bodyMedium, color = fg)
             }
         }
     }
@@ -352,13 +376,14 @@ private fun SentBubble(msg: ChatMessage, language: AppLanguage, onDismiss: () ->
 @Composable
 private fun PriorityBadge(priority: String, parentFg: Color) {
     Surface(
-        color = parentFg.copy(alpha = 0.15f),
+        color = parentFg.copy(alpha = 0.2f),
         shape = RoundedCornerShape(4.dp)
     ) {
         Text(
             priority,
             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
             style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Bold,
             color = parentFg
         )
     }

@@ -13,7 +13,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.key.*
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.suprogramuota_visata.api.ApiSvClient
 import com.suprogramuota_visata.api.domain.models.TypeDTO
@@ -42,17 +44,28 @@ fun SearchableTypeDropdown(
     var expanded by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
     var showCreateDialog by remember { mutableStateOf(false) }
+    val normalizedTypeName = when (typeName) {
+        "Product", "Item", "Prekė", "ProductSv" -> "ProductSv"
+        "Service", "Paslauga", "ServiceSv" -> "ServiceSv"
+        "Partner", "Partneris", "PartnerSv" -> "PartnerSv"
+        "Warehouse", "Sandėlis", "WarehouseSv" -> "WarehouseSv"
+        "Division", "Department", "Padalinys", "DivisionSv" -> "DivisionSv"
+        "Location", "Lokacija", "LocationSv" -> "LocationSv"
+        "Unit", "Matas", "Matavimo vienetas", "UnitSv" -> "UnitSv"
+        else -> typeName
+    }
+
     val scope = rememberCoroutineScope()
 
     // Užkrauname tipus iš serverio
-    LaunchedEffect(typeName) {
+    LaunchedEffect(normalizedTypeName) {
         isLoading = true
-        when (val result = apiClient.typeRepository.getAllByType(typeName)) {
+        when (val result = apiClient.typeRepository.getAllByType(normalizedTypeName)) {
             is ApiResult.Success -> {
                 types = result.data ?: emptyList()
                 val selectedType = types.find { it.id == selectedTypeId }
                 if (selectedType != null) {
-                    searchQuery = selectedType.name
+                    searchQuery = selectedType.code?.takeIf { it.isNotBlank() } ?: selectedType.name
                 }
             }
             is ApiResult.Error -> {
@@ -66,8 +79,11 @@ fun SearchableTypeDropdown(
     LaunchedEffect(selectedTypeId, types) {
         if (selectedTypeId != null) {
             val selectedType = types.find { it.id == selectedTypeId }
-            if (selectedType != null && searchQuery != selectedType.name) {
-                searchQuery = selectedType.name
+            if (selectedType != null) {
+                val targetVal = selectedType.code?.takeIf { it.isNotBlank() } ?: selectedType.name
+                if (searchQuery != targetVal && searchQuery != selectedType.name) {
+                    searchQuery = targetVal
+                }
             }
         } else {
             searchQuery = ""
@@ -75,7 +91,20 @@ fun SearchableTypeDropdown(
     }
 
     val filteredTypes = types.filter {
-        it.name.contains(searchQuery, ignoreCase = true)
+        it.name.contains(searchQuery, ignoreCase = true) ||
+        (it.code?.contains(searchQuery, ignoreCase = true) == true) ||
+        (it.barcode?.contains(searchQuery, ignoreCase = true) == true)
+    }
+
+    val currentSelectedType = types.find { it.id == selectedTypeId }
+    val dynamicLabel = remember(label, currentSelectedType) {
+        if (label.contains("(")) {
+            label
+        } else if (currentSelectedType != null && currentSelectedType.name.isNotBlank()) {
+            "$label (${currentSelectedType.name})"
+        } else {
+            label
+        }
     }
 
     ExposedDropdownMenuBox(
@@ -90,9 +119,23 @@ fun SearchableTypeDropdown(
                 expanded = true
                 if (it.isBlank()) {
                     onSelected(null)
+                } else {
+                    val exactMatch = types.find { t ->
+                        t.code.equals(it.trim(), ignoreCase = true) ||
+                        t.barcode.equals(it.trim(), ignoreCase = true)
+                    }
+                    if (exactMatch != null && exactMatch.id != selectedTypeId) {
+                        onSelected(exactMatch)
+                    }
                 }
             },
-            label = { Text(label) },
+            label = {
+                Text(
+                    text = dynamicLabel,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            },
             trailingIcon = {
                 if (searchQuery.isNotEmpty()) {
                     IconButton(onClick = {
@@ -109,7 +152,24 @@ fun SearchableTypeDropdown(
             isError = isError,
             supportingText = supportingText?.let { { Text(it) } },
             colors = colors ?: ExposedDropdownMenuDefaults.outlinedTextFieldColors(),
-            modifier = Modifier.menuAnchor().fillMaxWidth()
+            modifier = Modifier
+                .menuAnchor()
+                .fillMaxWidth()
+                .onPreviewKeyEvent { event ->
+                    if (event.type == KeyEventType.KeyDown && event.key == Key.Enter) {
+                        val match = types.find {
+                            it.code.equals(searchQuery.trim(), ignoreCase = true) ||
+                            it.barcode.equals(searchQuery.trim(), ignoreCase = true) ||
+                            it.name.equals(searchQuery.trim(), ignoreCase = true)
+                        } ?: filteredTypes.firstOrNull()
+                        if (match != null) {
+                            searchQuery = match.code?.takeIf { it.isNotBlank() } ?: match.name
+                            expanded = false
+                            onSelected(match)
+                        }
+                        true
+                    } else false
+                }
         )
 
         ExposedDropdownMenu(
@@ -206,9 +266,12 @@ fun SearchableTypeDropdown(
 
                 filteredTypes.forEach { type ->
                     DropdownMenuItem(
-                        text = { Text(type.name) },
+                        text = { 
+                            val codePrefix = type.code?.takeIf { it.isNotBlank() }?.let { "[$it] " } ?: ""
+                            Text("$codePrefix${type.name}") 
+                        },
                         onClick = {
-                            searchQuery = type.name
+                            searchQuery = type.code?.takeIf { it.isNotBlank() } ?: type.name
                             expanded = false
                             onSelected(type)
                         }
@@ -240,7 +303,7 @@ fun SearchableTypeDropdown(
                                 val newType = TypeDTO(
                                     name = newTypeName,
                                     enabled = true,
-                                    type = typeName
+                                    type = normalizedTypeName
                                 )
                                 when (val result = apiClient.typeRepository.create(newType)) {
                                     is ApiResult.Success -> {

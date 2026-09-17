@@ -18,6 +18,13 @@ class TypesViewModel(private val apiClient: ApiSvClient) : BaseViewModel() {
         
     var groupFilter by mutableStateOf<TypeDTO?>(null)
         private set
+
+    var filterGroupIds by mutableStateOf<Set<Int>?>(null)
+        private set
+    var isRootGroupIncluded by mutableStateOf(true)
+        private set
+    var rootGroupId by mutableStateOf<Int?>(null)
+        private set
         
     var pageSize by mutableStateOf(com.suprogramuota_visata.vedlys.AppSettings.paginationLimit.value)
     var currentOffset = 0L
@@ -47,6 +54,9 @@ class TypesViewModel(private val apiClient: ApiSvClient) : BaseViewModel() {
         if (typeName != value) {
             typeName = value
             groupFilter = null
+            filterGroupIds = null
+            isRootGroupIncluded = true
+            rootGroupId = null
             loadInitial()
         }
     }
@@ -56,14 +66,38 @@ class TypesViewModel(private val apiClient: ApiSvClient) : BaseViewModel() {
         updateItems()
     }
 
+    fun updateGroupMultiFilter(selectedIds: Set<Int>?, includeRoot: Boolean = true, rootId: Int? = null) {
+        filterGroupIds = selectedIds
+        isRootGroupIncluded = includeRoot
+        rootGroupId = rootId
+        updateItems()
+    }
+
     fun updateGroupFilter(group: TypeDTO?) {
         groupFilter = group
+        filterGroupIds = if (group?.id != null) setOf(group.id!!) else null
+        isRootGroupIncluded = group == null || group.id == null || group.id == 0
+        rootGroupId = group?.id
         updateItems()
     }
 
     private fun updateItems() {
         val activeFiltered = if (showInactive) allItems else allItems.filter { it.enabled }
-        items = if (groupFilter == null) activeFiltered else activeFiltered.filter { it.groupId == groupFilter?.id }
+        val gIds = filterGroupIds
+        items = if (gIds == null) {
+            if (groupFilter == null) activeFiltered else activeFiltered.filter { it.groupId == groupFilter?.id }
+        } else {
+            if (typeName == "GroupSv") {
+                activeFiltered.filter { item ->
+                    item.id != null && gIds.contains(item.id)
+                }
+            } else {
+                activeFiltered.filter { item ->
+                    (item.groupId != null && gIds.contains(item.groupId)) ||
+                    (isRootGroupIncluded && (item.groupId == null || item.groupId == 0 || (rootGroupId != null && item.groupId == rootGroupId)))
+                }
+            }
+        }
     }
 
     fun loadInitial() {

@@ -16,7 +16,14 @@ import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.UnfoldMore
+import androidx.compose.material.icons.filled.UnfoldLess
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.foundation.Image
 import androidx.compose.ui.window.Dialog
 import com.suprogramuota_visata.vedlys.ui.components.ImageAttributeField
@@ -62,10 +69,10 @@ import com.suprogramuota_visata.vedlys.ui.components.PredefinedStandardFields
 
 val PredefinedTypeGroups = listOf(
     "ProductSv", "PartnerSv", "ServiceSv", "DivisionSv", "WarehouseSv", "LocationSv", "AddressSv", 
-    "TransactionSv", "TransactionDetailSv", 
+    "BankSv", "TransactionSv", 
     "FinancialTransactionDetailSv", "OperationalTransactionDetailSv", "DeliveryTransactionDetailSv", "CrmTransactionDetailSv",
-    "GroupSv", "UnitSv", "CATEGORY", "STATUS", "ATTRIBUTE", "USER_ROLE",
-    "SettingsSv", "OwnerSv", "BankSv"
+    "GroupSv", "UnitSv",
+    "SettingsSv", "OwnerSv", "UserSv"
 )
 val PredefinedAttributeTypes = listOf("INTEGER", "LONG", "DECIMAL", "DATE", "DATE_TIME", "TIMESTAMP", "STRING", "BOOL", "STRING_LIST", "URL_LIST", "JSON_STRING", "XML_STRING", "EMAIL_LIST", "Local_Type")
 
@@ -142,13 +149,243 @@ fun String.formatGroupName(language: AppLanguage = AppLanguage.LT): String {
         "CrmTransactionDetailSv", "CRM Transaction Detail", "GroupSv", "Group",
         "UnitSv", "Unit", "SettingsSv", "Settings", "OwnerSv", "Owner", "PhoneSv", "EmailSv", "UrlSv", "DeviceSv"
     ).forEach { sysType ->
-        if (result == sysType || result == "Šakninė grupė - $sysType") {
+        if (result == sysType || result == "Šakninė grupė - $sysType" || result == sysType.toFriendlyTypeName(AppLanguage.LT) || result == sysType.toFriendlyTypeName(AppLanguage.EN)) {
             result = sysType.toFriendlyTypeName(language)
         }
     }
     if (language == AppLanguage.EN) {
         result = result.replace("Šakninė grupė", "Root Group")
     }
+    return result
+}
+
+data class GroupHierarchyNode(
+    val group: TypeDTO,
+    val depth: Int
+)
+
+fun isDescendantOf(candidateId: Int?, ancestorId: Int, all: List<TypeDTO>): Boolean {
+    var curr = candidateId
+    val seen = mutableSetOf<Int>()
+    while (curr != null && curr != 0 && seen.add(curr)) {
+        val parent = all.find { it.id == curr }
+        val pId = parent?.parentGroupId
+        if (pId == ancestorId) return true
+        curr = pId
+    }
+    return false
+}
+
+fun getAllDescendantIds(pId: Int, all: List<TypeDTO>): Set<Int> {
+    val direct = all.filter { it.parentGroupId == pId }.mapNotNull { it.id }
+    return direct.toSet() + direct.flatMap { getAllDescendantIds(it, all) }
+}
+
+data class GroupTreeDisplayItem(
+    val item: TypeDTO,
+    val depth: Int,
+    val path: String = "",
+    val parentName: String? = null,
+    val hasChildren: Boolean = false,
+    val childCount: Int = 0,
+    val parentId: Int? = null
+)
+
+fun orderGroupsHierarchically(rawList: List<TypeDTO>, language: AppLanguage = AppLanguage.LT): List<GroupTreeDisplayItem> {
+    if (rawList.isEmpty()) return emptyList()
+    val result = mutableListOf<GroupTreeDisplayItem>()
+    val idMap = rawList.associateBy { it.id }
+
+    val roots = rawList.filter { item ->
+        item.parentGroupId == null || item.parentGroupId == 0 ||
+        !idMap.containsKey(item.parentGroupId)
+    }
+
+    val visited = mutableSetOf<Int>()
+
+    fun addNodeAndChildren(node: TypeDTO, currentDepth: Int, currentPath: String, parentNodeName: String?) {
+        val nodeId = node.id
+        if (nodeId != null && visited.contains(nodeId)) return
+        if (nodeId != null) visited.add(nodeId)
+
+        val nodeName = node.name.formatGroupName(language).ifBlank { "Grupė #${node.id}" }
+        val fullPath = if (currentPath.isBlank()) nodeName else "$currentPath > $nodeName"
+
+        val directChildren = if (nodeId != null) rawList.filter { it.parentGroupId == nodeId && it.id != nodeId } else emptyList()
+        val hasChildren = directChildren.isNotEmpty()
+        val childCount = if (nodeId != null) getAllDescendantIds(nodeId, rawList).size else 0
+
+        result.add(GroupTreeDisplayItem(
+            item = node,
+            depth = currentDepth,
+            path = fullPath,
+            parentName = parentNodeName,
+            hasChildren = hasChildren,
+            childCount = childCount,
+            parentId = node.parentGroupId
+        ))
+
+        directChildren.forEach { child ->
+            addNodeAndChildren(child, currentDepth + 1, fullPath, nodeName)
+        }
+    }
+
+    roots.forEach { root ->
+        addNodeAndChildren(root, 0, "", null)
+    }
+
+    rawList.forEach { item ->
+        val itemId = item.id
+        if (itemId == null || !visited.contains(itemId)) {
+            val pName = item.parentGroupId?.let { idMap[it]?.name?.formatGroupName(language) }
+            val directChildren = if (itemId != null) rawList.filter { it.parentGroupId == itemId && it.id != itemId } else emptyList()
+            val hasChildren = directChildren.isNotEmpty()
+            val childCount = if (itemId != null) getAllDescendantIds(itemId, rawList).size else 0
+            result.add(GroupTreeDisplayItem(
+                item = item,
+                depth = item.level ?: 0,
+                path = "",
+                parentName = pName,
+                hasChildren = hasChildren,
+                childCount = childCount,
+                parentId = item.parentGroupId
+            ))
+        }
+    }
+
+    return result
+}
+
+fun filterCollapsedGroups(
+    hierarchicalItems: List<GroupTreeDisplayItem>,
+    collapsedIds: Set<Int>,
+    allGroups: List<TypeDTO>
+): List<GroupTreeDisplayItem> {
+    if (collapsedIds.isEmpty()) return hierarchicalItems
+    val hiddenIds = mutableSetOf<Int>()
+    for (collapsedId in collapsedIds) {
+        hiddenIds.addAll(getAllDescendantIds(collapsedId, allGroups))
+    }
+    return hierarchicalItems.filter { it.item.id == null || !hiddenIds.contains(it.item.id) }
+}
+
+data class GroupDropdownOption(
+    val group: TypeDTO?, // null means "Root / Šaknis"
+    val displayName: String,
+    val depth: Int,
+    val fullPath: String
+)
+
+fun buildGroupDropdownOptions(
+    allGroups: List<TypeDTO>,
+    excludeId: Int?,
+    language: AppLanguage,
+    allowRootOption: Boolean = true,
+    filterTargetType: String? = null
+): List<GroupDropdownOption> {
+    val result = mutableListOf<GroupDropdownOption>()
+    if (allowRootOption) {
+        result.add(
+            GroupDropdownOption(
+                group = null,
+                displayName = if (language == AppLanguage.EN) "— Root Category (Domain) —" else "— Šakninė kategorija (Root) —",
+                depth = 0,
+                fullPath = if (language == AppLanguage.EN) "Root" else "Šaknis"
+            )
+        )
+    }
+
+    val idMap = allGroups.associateBy { it.id }
+    val roots = allGroups.filter {
+        (it.level == 0 || it.isChild == false || it.parentGroupId == null || !idMap.containsKey(it.parentGroupId)) &&
+        (filterTargetType.isNullOrBlank() || it.targetType.equals(filterTargetType, ignoreCase = true) || it.name.equals(filterTargetType.removeSuffix("Sv"), ignoreCase = true))
+    }
+
+    val visited = mutableSetOf<Int>()
+
+    fun traverse(node: TypeDTO, depth: Int, parentPath: String) {
+        val nId = node.id ?: return
+        if (visited.contains(nId)) return
+        if (excludeId != null && (nId == excludeId || isDescendantOf(nId, excludeId, allGroups))) return
+        visited.add(nId)
+
+        val formattedName = node.name.formatGroupName(language)
+        val currentPath = if (parentPath.isBlank()) formattedName else "$parentPath > $formattedName"
+        val indent = "    ".repeat(depth)
+        val prefix = if (depth == 0) "📁 " else "└── 📁 "
+
+        result.add(
+            GroupDropdownOption(
+                group = node,
+                displayName = "$indent$prefix$formattedName",
+                depth = depth,
+                fullPath = currentPath
+            )
+        )
+
+        val children = allGroups.filter { it.parentGroupId == nId && it.id != nId }
+        children.forEach { child ->
+            traverse(child, depth + 1, currentPath)
+        }
+    }
+
+    roots.forEach { root ->
+        traverse(root, 0, "")
+    }
+
+    allGroups.filter {
+        filterTargetType.isNullOrBlank() || it.targetType.equals(filterTargetType, ignoreCase = true) || it.name.equals(filterTargetType.removeSuffix("Sv"), ignoreCase = true)
+    }.forEach { g ->
+        val gId = g.id
+        if (gId != null && !visited.contains(gId)) {
+            traverse(g, g.level ?: 1, "")
+        }
+    }
+
+    return result
+}
+
+fun buildFlatGroupHierarchy(
+    root: TypeDTO,
+    allChildren: List<TypeDTO>
+): List<GroupHierarchyNode> {
+    val result = mutableListOf<GroupHierarchyNode>()
+    val rootId = root.id
+
+    val level1 = allChildren.filter {
+        it.parentGroupId == null || it.parentGroupId == rootId || it.parentGroupId == 0 ||
+        allChildren.none { p -> p.id == it.parentGroupId }
+    }
+
+    fun addSubtree(parentId: Int, currentDepth: Int) {
+        val subs = allChildren.filter { it.parentGroupId == parentId }
+        subs.forEach { sub ->
+            if (result.none { it.group.id == sub.id }) {
+                result.add(GroupHierarchyNode(sub, currentDepth))
+                val subId = sub.id
+                if (subId != null) {
+                    addSubtree(subId, currentDepth + 1)
+                }
+            }
+        }
+    }
+
+    level1.forEach { child ->
+        if (result.none { it.group.id == child.id }) {
+            result.add(GroupHierarchyNode(child, 1))
+            val childId = child.id
+            if (childId != null) {
+                addSubtree(childId, 2)
+            }
+        }
+    }
+
+    allChildren.forEach { child ->
+        if (result.none { it.group.id == child.id }) {
+            result.add(GroupHierarchyNode(child, 1))
+        }
+    }
+
     return result
 }
 
@@ -167,17 +404,23 @@ fun TypesScreen(
 
     var showEditor by remember { mutableStateOf(false) }
     var editingItem by remember { mutableStateOf<TypeDTO?>(null) }
+    var parentForNewChild by remember { mutableStateOf<TypeDTO?>(null) }
     var deleteCandidate by remember { mutableStateOf<TypeDTO?>(null) }
     var previewImageUuid by remember { mutableStateOf<String?>(null) }
 
-    val groupsViewModel = remember { TypesViewModel(apiClient) }
     var groups by remember { mutableStateOf<List<TypeDTO>>(emptyList()) }
-    LaunchedEffect(Unit) {
-        groupsViewModel.updateTypeName("GroupSv")
-        groupsViewModel.loadInitial()
+    fun reloadGroups() {
+        scope.launch {
+            when (val res = apiClient.typeRepository.getAllByType("GroupSv")) {
+                is com.suprogramuota_visata.api.domain.util.ApiResult.Success -> {
+                    groups = res.data ?: emptyList()
+                }
+                else -> {}
+            }
+        }
     }
-    LaunchedEffect(groupsViewModel.items) {
-        groups = groupsViewModel.items
+    LaunchedEffect(Unit) {
+        reloadGroups()
     }
 
     Scaffold(
@@ -196,6 +439,7 @@ fun TypesScreen(
         floatingActionButton = {
             FloatingActionButton(onClick = {
                 editingItem = null
+                parentForNewChild = null
                 showEditor = true
             }) {
                 Icon(Icons.Default.Add, contentDescription = getTypesString("new_type", language))
@@ -246,16 +490,174 @@ fun TypesScreen(
                         }
                     }
                     
-                    // Grupės filtras
+                    // Grupės filtras su Checked List
+                    val isGroupCatalog = viewModel.typeName == "GroupSv"
+
+                    val allGroupRoots = remember(groups) {
+                        groups.filter {
+                            (it.level == 0 || it.isChild == false || it.parentGroupId == null)
+                        }
+                    }
+
+                    val allCatalogGroupIds = remember(groups) {
+                        groups.mapNotNull { it.id }.toSet()
+                    }
+
+                    val currentRootGroup = remember(groups, viewModel.typeName) {
+                        groups.find {
+                            (it.targetType.equals(viewModel.typeName, ignoreCase = true) ||
+                             it.targetType.equals(viewModel.typeName.removeSuffix("Sv"), ignoreCase = true)) &&
+                            (it.level == 0 || it.isChild == false || it.parentGroupId == null)
+                        } ?: groups.find {
+                            (it.name.equals(viewModel.typeName.removeSuffix("Sv"), ignoreCase = true) ||
+                             it.name.equals(viewModel.typeName, ignoreCase = true)) &&
+                            (it.level == 0 || it.isChild == false || it.parentGroupId == null)
+                        } ?: TypeDTO(
+                            id = 0,
+                            name = viewModel.typeName.removeSuffix("Sv"),
+                            type = "GroupSv",
+                            enabled = true,
+                            isChild = false,
+                            level = 0,
+                            targetType = viewModel.typeName,
+                            attributes = emptyList()
+                        )
+                    }
+
+                    val currentChildGroups = remember(groups, viewModel.typeName, currentRootGroup) {
+                        groups.filter {
+                            (it.targetType.equals(viewModel.typeName, ignoreCase = true) ||
+                             it.targetType.equals(viewModel.typeName.removeSuffix("Sv"), ignoreCase = true)) &&
+                            it.id != currentRootGroup.id &&
+                            (it.isChild == true || (it.level?.let { l -> l > 0 } == true) || it.parentGroupId != null)
+                        }
+                    }
+
+                    val flatHierarchy = remember(currentRootGroup, currentChildGroups) {
+                        buildFlatGroupHierarchy(currentRootGroup, currentChildGroups)
+                    }
+
+                    val allGroupIds = remember(currentRootGroup, currentChildGroups) {
+                        setOfNotNull(currentRootGroup.id ?: 0) + currentChildGroups.mapNotNull { it.id }
+                    }
+
+                    var isAllSelectedMode by remember(viewModel.typeName) { mutableStateOf(true) }
+                    var checkedGroupIds by remember(viewModel.typeName) {
+                        mutableStateOf(if (isGroupCatalog) allCatalogGroupIds else allGroupIds)
+                    }
+
+                    LaunchedEffect(allGroupIds, allCatalogGroupIds, isGroupCatalog) {
+                        val relevantAll = if (isGroupCatalog) allCatalogGroupIds else allGroupIds
+                        if (isAllSelectedMode || checkedGroupIds.isEmpty()) {
+                            checkedGroupIds = relevantAll
+                            isAllSelectedMode = true
+                        } else {
+                            // If user filtered by specific groups, but a child was added to an already-checked parent, include the new child
+                            val newChildren = groups.filter { it.parentGroupId != null && checkedGroupIds.contains(it.parentGroupId) }.mapNotNull { it.id }
+                            if (newChildren.isNotEmpty() && !checkedGroupIds.containsAll(newChildren)) {
+                                checkedGroupIds = checkedGroupIds + newChildren
+                            }
+                        }
+                    }
+
+                    val rootId = currentRootGroup.id ?: 0
+                    val isAllSelectedNonGroup = isAllSelectedMode || (allGroupIds.isNotEmpty() && checkedGroupIds.containsAll(allGroupIds))
+                    val isAllSelectedGroup = isAllSelectedMode || (allCatalogGroupIds.isNotEmpty() && checkedGroupIds.containsAll(allCatalogGroupIds))
+
+                    LaunchedEffect(checkedGroupIds, currentRootGroup, currentChildGroups, isGroupCatalog, allCatalogGroupIds, isAllSelectedMode) {
+                        if (isGroupCatalog) {
+                            if (isAllSelectedGroup) {
+                                viewModel.updateGroupMultiFilter(null, includeRoot = true, rootId = 0)
+                            } else {
+                                viewModel.updateGroupMultiFilter(checkedGroupIds, includeRoot = true, rootId = 0)
+                            }
+                        } else {
+                            if (isAllSelectedNonGroup) {
+                                viewModel.updateGroupMultiFilter(null, includeRoot = true, rootId = rootId)
+                            } else {
+                                val isRootChecked = checkedGroupIds.contains(rootId)
+                                viewModel.updateGroupMultiFilter(
+                                    selectedIds = checkedGroupIds,
+                                    includeRoot = isRootChecked,
+                                    rootId = rootId
+                                )
+                            }
+                        }
+                    }
+
+                    fun toggleRoot() {
+                        val isRootChecked = checkedGroupIds.contains(rootId)
+                        if (isRootChecked) {
+                            checkedGroupIds = emptySet()
+                            isAllSelectedMode = false
+                        } else {
+                            checkedGroupIds = allGroupIds
+                            isAllSelectedMode = true
+                        }
+                    }
+
+                    fun toggleChild(child: TypeDTO) {
+                        val cId = child.id ?: return
+                        fun getDescendantIds(pId: Int): Set<Int> {
+                            val direct = currentChildGroups.filter { it.parentGroupId == pId }.mapNotNull { it.id }
+                            return direct.toSet() + direct.flatMap { getDescendantIds(it) }
+                        }
+                        val targetIds = setOf(cId) + getDescendantIds(cId)
+                        val isCurrentlyChecked = checkedGroupIds.contains(cId)
+
+                        val newSet = checkedGroupIds.toMutableSet()
+                        if (isCurrentlyChecked) {
+                            newSet.removeAll(targetIds)
+                            newSet.remove(currentRootGroup.id ?: 0)
+                        } else {
+                            newSet.addAll(targetIds)
+                            if (currentChildGroups.all { newSet.contains(it.id) }) {
+                                newSet.add(currentRootGroup.id ?: 0)
+                            }
+                        }
+                        checkedGroupIds = newSet
+                        isAllSelectedMode = allGroupIds.isNotEmpty() && newSet.containsAll(allGroupIds)
+                    }
+
+                    val groupDisplayText = if (isGroupCatalog) {
+                        when {
+                            isAllSelectedGroup -> if (language == AppLanguage.EN) "All Groups" else "Visos grupės"
+                            checkedGroupIds.isEmpty() -> if (language == AppLanguage.EN) "None selected" else "Nepasirinkta"
+                            else -> {
+                                val singleRoot = allGroupRoots.find { r ->
+                                    val fam = setOfNotNull(r.id) + getAllDescendantIds(r.id ?: 0, groups)
+                                    checkedGroupIds == fam
+                                }
+                                if (singleRoot != null) {
+                                    singleRoot.name.formatGroupName(language)
+                                } else {
+                                    if (language == AppLanguage.EN) "${checkedGroupIds.size} selected" else "Pasirinkta (${checkedGroupIds.size})"
+                                }
+                            }
+                        }
+                    } else {
+                        when {
+                            isAllSelectedNonGroup -> currentRootGroup.name.formatGroupName(language)
+                            checkedGroupIds.isEmpty() -> if (language == AppLanguage.EN) "None selected" else "Nepasirinkta"
+                            checkedGroupIds.size == 1 -> {
+                                val singleId = checkedGroupIds.first()
+                                val g = if (singleId == rootId) currentRootGroup else currentChildGroups.find { it.id == singleId }
+                                g?.name?.formatGroupName(language) ?: if (language == AppLanguage.EN) "1 selected" else "1 pasirinkta"
+                            }
+                            else -> {
+                                if (language == AppLanguage.EN) "${checkedGroupIds.size} selected" else "Pasirinkta (${checkedGroupIds.size})"
+                            }
+                        }
+                    }
+
                     var expandedGroup by remember { mutableStateOf(false) }
                     ExposedDropdownMenuBox(
                         expanded = expandedGroup,
                         onExpandedChange = { expandedGroup = !expandedGroup },
                         modifier = Modifier.weight(1f)
                     ) {
-                        val groupText = viewModel.groupFilter?.name ?: getTypesString("all_groups", language)
                         OutlinedTextField(
-                            value = groupText,
+                            value = groupDisplayText,
                             onValueChange = {},
                             readOnly = true,
                             label = { Text(getTypesString("group", language)) },
@@ -267,28 +669,195 @@ fun TypesScreen(
                             expanded = expandedGroup,
                             onDismissRequest = { expandedGroup = false }
                         ) {
-                            DropdownMenuItem(
-                                text = { Text(getTypesString("all_groups", language)) },
-                                onClick = {
-                                    viewModel.updateGroupFilter(null)
-                                    expandedGroup = false
-                                    focusManager.clearFocus()
-                                }
-                            )
-                            val applicableGroups = if (viewModel.typeName == "GroupSv") {
-                                groups.filter { it.isChild == false }
-                            } else {
-                                groups.filter { it.targetType == viewModel.typeName }
-                            }
-                            applicableGroups.forEach { grp ->
+                            if (isGroupCatalog) {
                                 DropdownMenuItem(
-                                    text = { Text(grp.name) },
+                                    text = {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Checkbox(
+                                                checked = isAllSelectedGroup,
+                                                onCheckedChange = {
+                                                    val newAll = !isAllSelectedGroup
+                                                    isAllSelectedMode = newAll
+                                                    checkedGroupIds = if (newAll) allCatalogGroupIds else emptySet()
+                                                }
+                                            )
+                                            Spacer(Modifier.width(8.dp))
+                                            Text(
+                                                text = if (language == AppLanguage.EN) "All Groups" else "Visos grupės",
+                                                fontWeight = FontWeight.Bold,
+                                                style = MaterialTheme.typography.bodyMedium
+                                            )
+                                        }
+                                    },
                                     onClick = {
-                                        viewModel.updateGroupFilter(grp)
-                                        expandedGroup = false
-                                        focusManager.clearFocus()
-                                    }
+                                        val newAll = !isAllSelectedGroup
+                                        isAllSelectedMode = newAll
+                                        checkedGroupIds = if (newAll) allCatalogGroupIds else emptySet()
+                                    },
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
                                 )
+
+                                Divider(modifier = Modifier.padding(vertical = 4.dp))
+
+                                allGroupRoots.forEach { r ->
+                                    val rId = r.id ?: 0
+                                    val descendants = getAllDescendantIds(rId, groups)
+                                    val rootFamily = setOf(rId) + descendants
+                                    val isRootChecked = checkedGroupIds.contains(rId)
+
+                                    DropdownMenuItem(
+                                        text = {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                modifier = Modifier.fillMaxWidth()
+                                            ) {
+                                                Checkbox(
+                                                    checked = isRootChecked,
+                                                    onCheckedChange = {
+                                                        val newSet = checkedGroupIds.toMutableSet()
+                                                        if (isRootChecked) {
+                                                            newSet.removeAll(rootFamily)
+                                                        } else {
+                                                            newSet.addAll(rootFamily)
+                                                        }
+                                                        checkedGroupIds = newSet
+                                                        isAllSelectedMode = allCatalogGroupIds.isNotEmpty() && newSet.containsAll(allCatalogGroupIds)
+                                                    }
+                                                )
+                                                Spacer(Modifier.width(8.dp))
+                                                Text(
+                                                    text = r.name.formatGroupName(language),
+                                                    fontWeight = FontWeight.Bold,
+                                                    style = MaterialTheme.typography.bodyMedium
+                                                )
+                                            }
+                                        },
+                                        onClick = {
+                                            val newSet = checkedGroupIds.toMutableSet()
+                                            if (isRootChecked) {
+                                                newSet.removeAll(rootFamily)
+                                            } else {
+                                                newSet.addAll(rootFamily)
+                                            }
+                                            checkedGroupIds = newSet
+                                            isAllSelectedMode = allCatalogGroupIds.isNotEmpty() && newSet.containsAll(allCatalogGroupIds)
+                                        },
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                    )
+
+                                    val childrenOfRoot = groups.filter {
+                                        (it.targetType.equals(r.targetType, ignoreCase = true) ||
+                                         it.targetType.equals(r.name, ignoreCase = true)) &&
+                                        it.id != r.id &&
+                                        descendants.contains(it.id)
+                                    }
+                                    val rootHierarchy = buildFlatGroupHierarchy(r, childrenOfRoot)
+
+                                    rootHierarchy.forEach { node ->
+                                        val childId = node.group.id ?: 0
+                                        val isChildChecked = checkedGroupIds.contains(childId)
+                                        val childDescendants = getAllDescendantIds(childId, groups)
+                                        val childFamily = setOf(childId) + childDescendants
+
+                                        DropdownMenuItem(
+                                            text = {
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .padding(start = (node.depth * 16).dp)
+                                                ) {
+                                                    Checkbox(
+                                                        checked = isChildChecked,
+                                                        onCheckedChange = {
+                                                            val newSet = checkedGroupIds.toMutableSet()
+                                                            if (isChildChecked) {
+                                                                newSet.removeAll(childFamily)
+                                                            } else {
+                                                                newSet.addAll(childFamily)
+                                                            }
+                                                            checkedGroupIds = newSet
+                                                            isAllSelectedMode = allCatalogGroupIds.isNotEmpty() && newSet.containsAll(allCatalogGroupIds)
+                                                        }
+                                                    )
+                                                    Spacer(Modifier.width(8.dp))
+                                                    Text(
+                                                        text = node.group.name.formatGroupName(language),
+                                                        style = MaterialTheme.typography.bodyMedium
+                                                    )
+                                                }
+                                            },
+                                            onClick = {
+                                                val newSet = checkedGroupIds.toMutableSet()
+                                                if (isChildChecked) {
+                                                    newSet.removeAll(childFamily)
+                                                } else {
+                                                    newSet.addAll(childFamily)
+                                                }
+                                                checkedGroupIds = newSet
+                                                isAllSelectedMode = allCatalogGroupIds.isNotEmpty() && newSet.containsAll(allCatalogGroupIds)
+                                            },
+                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+                            } else {
+                                // Šakninė grupė (Root branch)
+                                val isRootChecked = checkedGroupIds.contains(rootId)
+                                DropdownMenuItem(
+                                    text = {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Checkbox(
+                                                checked = isRootChecked,
+                                                onCheckedChange = { toggleRoot() }
+                                            )
+                                            Spacer(Modifier.width(8.dp))
+                                            Text(
+                                                text = currentRootGroup.name.formatGroupName(language),
+                                                fontWeight = FontWeight.Bold,
+                                                style = MaterialTheme.typography.bodyMedium
+                                            )
+                                        }
+                                    },
+                                    onClick = { toggleRoot() },
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                )
+
+                                if (flatHierarchy.isNotEmpty()) {
+                                    Divider(modifier = Modifier.padding(vertical = 4.dp))
+                                }
+
+                                flatHierarchy.forEach { node ->
+                                    val isChecked = checkedGroupIds.contains(node.group.id)
+                                    DropdownMenuItem(
+                                        text = {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(start = (node.depth * 16).dp)
+                                            ) {
+                                                Checkbox(
+                                                    checked = isChecked,
+                                                    onCheckedChange = { toggleChild(node.group) }
+                                                )
+                                                Spacer(Modifier.width(8.dp))
+                                                Text(
+                                                    text = node.group.name.formatGroupName(language),
+                                                    style = MaterialTheme.typography.bodyMedium
+                                                )
+                                            }
+                                        },
+                                        onClick = { toggleChild(node.group) },
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                    )
+                                }
                             }
                         }
                     }
@@ -296,7 +865,7 @@ fun TypesScreen(
                     Button(
                         onClick = { 
                             viewModel.loadInitial() 
-                            groupsViewModel.loadInitial()
+                            reloadGroups()
                         },
                         modifier = Modifier.height(56.dp)
                     ) {
@@ -489,12 +1058,79 @@ fun TypesScreen(
                             }
                     }
 
+                    val isGroupCatalog = viewModel.typeName == "GroupSv"
+                    val allGroupTreeItems = remember(viewModel.items, isGroupCatalog, language) {
+                        if (isGroupCatalog) {
+                            orderGroupsHierarchically(viewModel.items, language)
+                        } else {
+                            viewModel.items.map { GroupTreeDisplayItem(it, 0) }
+                        }
+                    }
+
+                    var collapsedGroupIds by remember(viewModel.typeName) { mutableStateOf(setOf<Int>()) }
+
+                    val displayItems = remember(allGroupTreeItems, collapsedGroupIds, isGroupCatalog, viewModel.items) {
+                        if (isGroupCatalog) {
+                            filterCollapsedGroups(allGroupTreeItems, collapsedGroupIds, viewModel.items)
+                        } else {
+                            allGroupTreeItems
+                        }
+                    }
+
+                    if (isGroupCatalog && allGroupTreeItems.any { it.hasChildren }) {
+                        val allParentIds = remember(allGroupTreeItems) {
+                            allGroupTreeItems.filter { it.hasChildren }.mapNotNull { it.item.id }.toSet()
+                        }
+                        val isAllCollapsed = allParentIds.isNotEmpty() && collapsedGroupIds.containsAll(allParentIds)
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = if (language == AppLanguage.EN) "Hierarchy View:" else "Hierarchijos rodymas:",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+
+                            OutlinedButton(
+                                onClick = {
+                                    collapsedGroupIds = if (isAllCollapsed) emptySet() else allParentIds
+                                },
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                                modifier = Modifier.height(28.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (isAllCollapsed) Icons.Default.UnfoldMore else Icons.Default.UnfoldLess,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(Modifier.width(4.dp))
+                                Text(
+                                    text = if (isAllCollapsed) {
+                                        if (language == AppLanguage.EN) "Expand all" else "Išskleisti visus"
+                                    } else {
+                                        if (language == AppLanguage.EN) "Collapse all" else "Suskleisti visus"
+                                    },
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                            }
+                        }
+                    }
+
                     LazyColumn(
                         state = listState,
                         modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        items(viewModel.items) { item ->
+                        items(displayItems, key = { it.item.id ?: it.item.hashCode() }) { displayNode ->
+                            val item = displayNode.item
+                            val depth = displayNode.depth
+                            val itemId = item.id
+                            val isCollapsed = itemId != null && collapsedGroupIds.contains(itemId)
                             val rawJson = item.attributes.find { 
                                 it.name.equals("Nuotraukos Meta", ignoreCase = true) || 
                                 it.attributeType == "JSON_STRING" || 
@@ -505,13 +1141,35 @@ fun TypesScreen(
 
                             TypeRow(
                                 item = item,
+                                depth = depth,
+                                path = displayNode.path,
                                 language = language,
                                 isSelected = item.id != null && viewModel.selectedItemIds.contains(item.id),
                                 onToggleSelect = { item.id?.let { id -> viewModel.toggleSelectItem(id) } },
+                                hasChildren = displayNode.hasChildren,
+                                childCount = displayNode.childCount,
+                                isCollapsed = isCollapsed,
+                                onToggleCollapse = if (itemId != null && displayNode.hasChildren) {
+                                    {
+                                        collapsedGroupIds = if (isCollapsed) {
+                                            collapsedGroupIds - itemId
+                                        } else {
+                                            collapsedGroupIds + itemId
+                                        }
+                                    }
+                                } else null,
                                 onEdit = {
                                     editingItem = item
+                                    parentForNewChild = null
                                     showEditor = true
                                 },
+                                onAddChild = if (isGroupCatalog) {
+                                    {
+                                        editingItem = null
+                                        parentForNewChild = item
+                                        showEditor = true
+                                    }
+                                } else null,
                                 onDelete = { deleteCandidate = item },
                                 onViewImage = if (imgUuid != null) {
                                     { previewImageUuid = imgUuid }
@@ -547,6 +1205,12 @@ fun TypesScreen(
                 onDismiss = { 
                     viewModel.clearError()
                     showEditor = false 
+                    parentForNewChild = null
+                },
+                parentForNewChild = parentForNewChild,
+                onReloadGroups = {
+                    reloadGroups()
+                    viewModel.loadInitial()
                 },
                 onSave = { dto, checkedChildren ->
                     scope.launch {
@@ -557,6 +1221,7 @@ fun TypesScreen(
                         }
                         if (res is com.suprogramuota_visata.api.domain.util.ApiResult.Success) {
                             showEditor = false
+                            parentForNewChild = null
                             val savedGroup = res.data
                             if (checkedChildren.isNotEmpty()) {
                                 checkedChildren.forEach { child ->
@@ -564,6 +1229,7 @@ fun TypesScreen(
                                 }
                             }
                             viewModel.loadInitial()
+                            reloadGroups()
                         } else if (res is com.suprogramuota_visata.api.domain.util.ApiResult.Error) {
                             viewModel.setError(res.message)
                         }
@@ -599,20 +1265,32 @@ fun TypesScreen(
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun TypeRow(
     item: TypeDTO,
+    depth: Int = 0,
+    path: String = "",
     language: AppLanguage,
     isSelected: Boolean = false,
     onToggleSelect: (() -> Unit)? = null,
+    hasChildren: Boolean = false,
+    childCount: Int = 0,
+    isCollapsed: Boolean = false,
+    onToggleCollapse: (() -> Unit)? = null,
     onEdit: () -> Unit,
+    onAddChild: (() -> Unit)? = null,
     onDelete: () -> Unit,
     onViewImage: (() -> Unit)? = null
 ) {
-    ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+    ElevatedCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = (depth * 20).dp)
+    ) {
         Row(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             if (onToggleSelect != null && item.id != null) {
@@ -620,75 +1298,191 @@ private fun TypeRow(
                     checked = isSelected,
                     onCheckedChange = { onToggleSelect() }
                 )
+                Spacer(Modifier.width(6.dp))
+            }
+
+            if (item.type == "GroupSv") {
+                if (hasChildren) {
+                    IconButton(
+                        onClick = { onToggleCollapse?.invoke() },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (isCollapsed) Icons.Default.KeyboardArrowRight else Icons.Default.KeyboardArrowDown,
+                            contentDescription = if (isCollapsed) "Išskleisti" else "Suskleisti",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                } else {
+                    Spacer(Modifier.width(28.dp))
+                }
+
+                IconButton(
+                    onClick = { if (hasChildren) onToggleCollapse?.invoke() },
+                    enabled = hasChildren,
+                    modifier = Modifier.size(28.dp)
+                ) {
+                    Icon(
+                        imageVector = if (hasChildren && !isCollapsed) Icons.Default.FolderOpen else Icons.Default.Folder,
+                        contentDescription = null,
+                        tint = if (depth == 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
                 Spacer(Modifier.width(8.dp))
             }
 
-            FlowRow(
+            Column(
                 modifier = Modifier.weight(1f),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.Center
             ) {
-                Text(
-                    text = item.name.formatGroupName(language), 
-                    style = MaterialTheme.typography.titleMedium, 
-                    fontWeight = FontWeight.SemiBold,
-                    color = if (item.enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
-                    modifier = Modifier.align(Alignment.CenterVertically)
-                )
-                AssistChip(
-                    onClick = {},
-                    label = { Text(item.type.toFriendlyTypeName(language)) },
-                    modifier = Modifier.align(Alignment.CenterVertically)
-                )
-                if (!item.enabled) {
-                    AssistChip(
-                        onClick = {},
-                        colors = AssistChipDefaults.assistChipColors(
-                            containerColor = MaterialTheme.colorScheme.errorContainer, 
-                            labelColor = MaterialTheme.colorScheme.onErrorContainer
-                        ),
-                        label = { Text(getTypesString("inactive", language)) },
-                        modifier = Modifier.align(Alignment.CenterVertically)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = item.name.formatGroupName(language), 
+                        style = MaterialTheme.typography.titleMedium, 
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (item.enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
                     )
+
+                    if (item.type == "GroupSv") {
+                        val isRoot = depth == 0 || item.level == 0 || item.isChild == false || (item.parentGroupId == null && item.id != null)
+                        if (isRoot) {
+                            SuggestionChip(
+                                onClick = {},
+                                label = { Text("Šaknis (0)") },
+                                colors = SuggestionChipDefaults.suggestionChipColors(
+                                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                    labelColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                ),
+                                modifier = Modifier.height(26.dp)
+                            )
+                        } else {
+                            SuggestionChip(
+                                onClick = {},
+                                label = { Text("Lygis ${item.level ?: depth}") },
+                                modifier = Modifier.height(26.dp)
+                            )
+                        }
+                        if (hasChildren) {
+                            SuggestionChip(
+                                onClick = { onToggleCollapse?.invoke() },
+                                label = { Text("Pošakiai: $childCount") },
+                                colors = SuggestionChipDefaults.suggestionChipColors(
+                                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                    labelColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                ),
+                                modifier = Modifier.height(26.dp)
+                            )
+                        }
+                        if (!item.targetType.isNullOrBlank()) {
+                            AssistChip(
+                                onClick = {},
+                                label = { Text("Tikslinis: ${item.targetType!!.toFriendlyTypeName(language)}") },
+                                modifier = Modifier.height(26.dp)
+                            )
+                        }
+                    } else {
+                        AssistChip(
+                            onClick = {},
+                            label = { Text(item.type.toFriendlyTypeName(language)) },
+                            modifier = Modifier.height(26.dp)
+                        )
+                    }
+
+                    if (!item.enabled) {
+                        AssistChip(
+                            onClick = {},
+                            colors = AssistChipDefaults.assistChipColors(
+                                containerColor = MaterialTheme.colorScheme.errorContainer, 
+                                labelColor = MaterialTheme.colorScheme.onErrorContainer
+                            ),
+                            label = { Text(getTypesString("inactive", language)) },
+                            modifier = Modifier.height(26.dp)
+                        )
+                    }
                 }
-                Text(
-                    text = buildString {
+
+                Spacer(Modifier.height(4.dp))
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    val metaDetails = buildString {
+                        if (item.type == "GroupSv" && path.isNotBlank() && depth > 0) {
+                            append("Kelias: $path  •  ")
+                        }
                         append("ID: ${item.id ?: "—"}")
-                        item.groupId?.let { append("  •  ${getTypesString("group", language)}: $it") }
+                        if (item.type == "GroupSv") {
+                            item.parentGroupId?.let { append("  •  Tėvas ID: $it") }
+                        } else {
+                            item.groupId?.let { append("  •  ${getTypesString("group", language)}: $it") }
+                        }
                         item.code?.let { append("  •  Kodas: $it") }
                         item.barcode?.let { append("  •  Barkodas: $it") }
                         if (item.attributes.isNotEmpty()) {
                             val attrsStr = item.attributes.joinToString(", ") { "${it.name}: ${it.value ?: "—"}" }
-                            append("  •  ${getTypesString("attributes", language)} $attrsStr")
+                            append("  •  ${getTypesString("attributes", language)}: $attrsStr")
                         }
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.align(Alignment.CenterVertically)
-                )
-            }
-            val isProtectedSystemItem = (item.id == 0) || (item.level == 0) || (item.isChild == false) || (item.parentGroupId == null && item.type == "GroupSv")
-            
-            if (onViewImage != null) {
-                IconButton(onClick = onViewImage) {
-                    Icon(
-                        Icons.Default.Visibility,
-                        contentDescription = "Peržiūrėti nuotrauką",
-                        tint = MaterialTheme.colorScheme.primary
+                    }
+                    Text(
+                        text = metaDetails,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
 
-            IconButton(onClick = onEdit) {
-                Icon(Icons.Default.Edit, contentDescription = getTypesString("edit", language))
-            }
-            if (!isProtectedSystemItem) {
-                IconButton(onClick = onDelete) {
-                    Icon(
-                        Icons.Default.Delete,
-                        contentDescription = getTypesString("delete", language),
-                        tint = MaterialTheme.colorScheme.error
-                    )
+            Spacer(Modifier.width(12.dp))
+
+            val isProtectedSystemItem = (item.id == 0) || (item.level == 0) || (item.isChild == false) || (item.parentGroupId == null && item.type == "GroupSv")
+            
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                if (onAddChild != null) {
+                    OutlinedButton(
+                        onClick = onAddChild,
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                        modifier = Modifier.height(32.dp)
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            text = if (language == AppLanguage.EN) "Add subgroup" else "Pridėti pogrupį",
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                    }
+                }
+
+                if (onViewImage != null) {
+                    IconButton(onClick = onViewImage, modifier = Modifier.size(36.dp)) {
+                        Icon(
+                            Icons.Default.Visibility,
+                            contentDescription = "Peržiūrėti nuotrauką",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+
+                IconButton(onClick = onEdit, modifier = Modifier.size(36.dp)) {
+                    Icon(Icons.Default.Edit, contentDescription = getTypesString("edit", language), modifier = Modifier.size(20.dp))
+                }
+                if (!isProtectedSystemItem) {
+                    IconButton(onClick = onDelete, modifier = Modifier.size(36.dp)) {
+                        Icon(
+                            Icons.Default.Delete,
+                            contentDescription = getTypesString("delete", language),
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
                 }
             }
         }
@@ -706,9 +1500,16 @@ internal fun TypeEditorDialog(
     errorMessage: String?,
     onClearError: () -> Unit,
     onDismiss: () -> Unit,
-    onSave: (TypeDTO, List<TypeDTO>) -> Unit
+    onSave: (TypeDTO, List<TypeDTO>) -> Unit,
+    parentForNewChild: TypeDTO? = null,
+    onReloadGroups: (() -> Unit)? = null
 ) {
-    var name by remember { mutableStateOf(initial?.name ?: "") }
+    var name by remember(initial, language) {
+        mutableStateOf(
+            if (initial?.type == "GroupSv") (initial?.name?.formatGroupName(language) ?: "")
+            else (initial?.name ?: "")
+        )
+    }
     var nameError by remember { mutableStateOf<String?>(null) }
     var nameDirty by remember { mutableStateOf(false) }
     val focusRequesterName = remember { FocusRequester() }
@@ -772,17 +1573,93 @@ internal fun TypeEditorDialog(
     }
 
     fun validateName(value: String): Boolean = validateStandardField("Pavadinimas", value)
-    var typeStr by remember { mutableStateOf(initial?.type ?: defaultTypeName) }
+    var typeStr by remember { 
+        mutableStateOf(if (parentForNewChild != null) "GroupSv" else (initial?.type ?: defaultTypeName)) 
+    }
+
+    val rootGroupForEditor = remember(allGroups, typeStr) {
+        allGroups.find {
+            (it.targetType.equals(typeStr, ignoreCase = true) ||
+             it.targetType.equals(typeStr.removeSuffix("Sv"), ignoreCase = true)) &&
+            (it.level == 0 || it.isChild == false || it.parentGroupId == null)
+        } ?: allGroups.find {
+            (it.name.equals(typeStr.removeSuffix("Sv"), ignoreCase = true) ||
+             it.name.equals(typeStr, ignoreCase = true)) &&
+            (it.level == 0 || it.isChild == false || it.parentGroupId == null)
+        }
+    }
+
+    val childGroupsForEditor = remember(allGroups, typeStr, rootGroupForEditor) {
+        allGroups.filter {
+            (it.targetType.equals(typeStr, ignoreCase = true) ||
+             it.targetType.equals(typeStr.removeSuffix("Sv"), ignoreCase = true)) &&
+            it.id != rootGroupForEditor?.id &&
+            (it.isChild == true || (it.level?.let { l -> l > 0 } == true) || it.parentGroupId != null)
+        }
+    }
+
+    val editorGroupNodes = remember(rootGroupForEditor, childGroupsForEditor) {
+        if (rootGroupForEditor != null) {
+            buildFlatGroupHierarchy(rootGroupForEditor, childGroupsForEditor)
+        } else {
+            childGroupsForEditor.map { GroupHierarchyNode(it, 1) }
+        }
+    }
+
+    val defaultTargetTypeForGroup = remember(parentForNewChild, initial, defaultTypeName) {
+        if (parentForNewChild != null) parentForNewChild.targetType ?: ""
+        else if (initial != null) initial.targetType ?: ""
+        else if (defaultTypeName != "GroupSv") defaultTypeName
+        else "ProductSv"
+    }
+
+    val defaultParentForGroup = remember(parentForNewChild, initial, defaultTargetTypeForGroup, allGroups) {
+        if (parentForNewChild != null) parentForNewChild
+        else if (initial != null) {
+            val pId = initial.parentGroupId
+            if (pId != null) allGroups.find { it.id == pId } else null
+        } else {
+            allGroups.find {
+                (it.targetType.equals(defaultTargetTypeForGroup, ignoreCase = true) ||
+                 it.name.equals(defaultTargetTypeForGroup.removeSuffix("Sv"), ignoreCase = true)) &&
+                (it.level == 0 || it.isChild == false || it.parentGroupId == null)
+            } ?: allGroups.firstOrNull { it.level == 0 || it.parentGroupId == null }
+        }
+    }
+
+    val defaultEditorGroupId = if (typeStr == "GroupSv") (defaultParentForGroup?.id?.toString() ?: "") else (rootGroupForEditor?.id?.toString() ?: "0")
+
     var enabled by remember { mutableStateOf(initial?.enabled ?: true) }
-    var isChild by remember { mutableStateOf(initial?.isChild ?: false) }
-    var targetType by remember { mutableStateOf(initial?.targetType ?: "") }
-    var groupId by remember { mutableStateOf(initial?.parentGroupId?.toString() ?: initial?.groupId?.toString() ?: "") }
+    var isChild by remember { 
+        mutableStateOf(
+            if (parentForNewChild != null) true 
+            else if (initial != null) (initial.parentGroupId != null || initial.isChild == true || (initial.level ?: 0) > 0)
+            else (defaultParentForGroup != null)
+        ) 
+    }
+    var targetType by remember { 
+        mutableStateOf(
+            if (parentForNewChild != null) (parentForNewChild.targetType ?: defaultTargetTypeForGroup)
+            else if (initial != null) (initial.targetType ?: defaultTargetTypeForGroup)
+            else (defaultParentForGroup?.targetType ?: defaultTargetTypeForGroup)
+        ) 
+    }
+    var groupId by remember {
+        mutableStateOf(
+            if (parentForNewChild != null) (parentForNewChild.id?.toString() ?: "")
+            else if (initial != null) (initial.parentGroupId?.toString() ?: initial.groupId?.toString() ?: "")
+            else defaultEditorGroupId
+        )
+    }
     
-    val computedLevel = remember(groupId, allGroups, typeStr) {
-        if (typeStr == "GroupSv" && groupId.isNotBlank()) {
-            val pId = groupId.toIntOrNull()
-            val parent = allGroups.find { it.id == pId }
-            (parent?.level ?: 0) + 1
+    val computedLevel = remember(groupId, allGroups, typeStr, isChild) {
+        if (typeStr == "GroupSv") {
+            if (!isChild || groupId.isBlank() || groupId == "0") 0
+            else {
+                val pId = groupId.toIntOrNull()
+                val parent = allGroups.find { it.id == pId }
+                (parent?.level ?: 0) + 1
+            }
         } else 0
     }
     
@@ -1005,7 +1882,17 @@ internal fun TypeEditorDialog(
         },
         properties = DialogProperties(usePlatformDefaultWidth = false),
         modifier = Modifier.fillMaxWidth(0.95f).fillMaxHeight(0.95f),
-        title = { Text(if (initial == null) getTypesString("create_new", language) else getTypesString("edit_type", language)) },
+        title = { 
+            Text(
+                when {
+                    parentForNewChild != null -> if (language == AppLanguage.EN) "New Subfolder in: ${parentForNewChild.name.formatGroupName(language)}" else "Naujas pogrupis aplanke: ${parentForNewChild.name.formatGroupName(language)}"
+                    typeStr == "GroupSv" && initial == null -> if (language == AppLanguage.EN) "New Group (Folder)" else "Nauja grupė (Katalogas)"
+                    typeStr == "GroupSv" && initial != null -> if (language == AppLanguage.EN) "Edit Group: ${initial.name.formatGroupName(language)}" else "Redaguoti grupę: ${initial.name.formatGroupName(language)}"
+                    initial == null -> getTypesString("create_new", language)
+                    else -> getTypesString("edit_type", language)
+                }
+            ) 
+        },
         text = {
             Column(
                 modifier = Modifier.fillMaxSize().verticalScroll(scrollState),
@@ -1116,45 +2003,25 @@ internal fun TypeEditorDialog(
                         )
                     }
 
-                    var expandedType by remember { mutableStateOf(false) }
-                    ExposedDropdownMenuBox(
-                        expanded = expandedType,
-                        onExpandedChange = { expandedType = !expandedType },
-                        modifier = Modifier.weight(1.2f)
-                    ) {
-                        OutlinedTextField(
-                            value = typeStr.toFriendlyTypeName(language),
-                            onValueChange = {},
-                            readOnly = true,
-                            label = { Text(getTypesString("type_group_req", language)) },
-                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedType) },
-                            colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(),
-                            modifier = Modifier.menuAnchor().fillMaxWidth(),
-                            singleLine = true
-                        )
-                        ExposedDropdownMenu(
-                            expanded = expandedType,
-                            onDismissRequest = { expandedType = false }
-                        ) {
-                            PredefinedTypeGroups.forEach { opt ->
-                                DropdownMenuItem(
-                                    text = { Text(opt.toFriendlyTypeName(language)) },
-                                    onClick = {
-                                        typeStr = opt
-                                        selectedTemplateId = null // Reset template when type changes
-                                        expandedType = false
-                                        focusManager.clearFocus()
-                                    }
-                                )
-                            }
-                        }
-                    }
+                    OutlinedTextField(
+                        value = typeStr.toFriendlyTypeName(language),
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text(getTypesString("type_group_req", language)) },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            disabledTextColor = MaterialTheme.colorScheme.onSurface,
+                            disabledBorderColor = MaterialTheme.colorScheme.outline,
+                            disabledLabelColor = MaterialTheme.colorScheme.onSurfaceVariant
+                        ),
+                        modifier = Modifier.weight(1.2f),
+                        singleLine = true
+                    )
 
                     // Šablono pasirinkimas
                     var expandedTemplate by remember { mutableStateOf(false) }
                     ExposedDropdownMenuBox(
                         expanded = expandedTemplate,
-                        onExpandedChange = { if (initial == null) expandedTemplate = !expandedTemplate },
+                        onExpandedChange = { expandedTemplate = !expandedTemplate },
                         modifier = Modifier.weight(1.2f)
                     ) {
                         val selectedTplName = templates.find { it.id == selectedTemplateId }?.name ?: getTypesString("not_selected", language)
@@ -1163,12 +2030,12 @@ internal fun TypeEditorDialog(
                             onValueChange = {},
                             readOnly = true,
                             label = { Text(getTypesString("template", language)) },
-                            trailingIcon = { if (initial == null) ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedTemplate) },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedTemplate) },
                             colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(),
                             modifier = Modifier.menuAnchor().fillMaxWidth(),
                             singleLine = true
                         )
-                        if (initial == null && templates.isNotEmpty()) {
+                        if (templates.isNotEmpty()) {
                             ExposedDropdownMenu(
                                 expanded = expandedTemplate,
                                 onDismissRequest = { expandedTemplate = false }
@@ -1196,62 +2063,402 @@ internal fun TypeEditorDialog(
                     }
                 }
 
-                // Row 2: Grupė, Brūkšninis kodas / Matavimo vienetas, Switch'ai
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    var expandedGroupSelection by remember { mutableStateOf(false) }
-                    ExposedDropdownMenuBox(
-                        expanded = expandedGroupSelection,
-                        onExpandedChange = { expandedGroupSelection = !expandedGroupSelection },
-                        modifier = Modifier.weight(1.3f)
-                    ) {
-                        val applicableGroups = if (typeStr == "GroupSv") {
-                            allGroups.filter { it.isChild == false }
+                if (typeStr == "GroupSv") {
+                    val isExistingRootGroup = remember(initial) {
+                        initial != null && ((initial.level ?: 0) == 0 && (initial.parentGroupId == null || initial.parentGroupId == 0))
+                    }
+                    val isExistingChildGroup = remember(initial, parentForNewChild, isChild) {
+                        parentForNewChild != null || (initial != null && ((initial.level ?: 0) > 0 || (initial.parentGroupId != null && initial.parentGroupId != 0))) || isChild
+                    }
+
+                    val groupDropdownOptions = remember(allGroups, initial?.id, language, targetType, isExistingRootGroup, isExistingChildGroup) {
+                        if (isExistingRootGroup) {
+                            emptyList()
                         } else {
-                            allGroups.filter { it.targetType == typeStr && it.isChild == true }
-                        }
-                        
-                        val selectedGroupObj = applicableGroups.find { it.id?.toString() == groupId }
-                        val selectedGroupName = selectedGroupObj?.name?.formatGroupName(language) ?: groupId
-                        
-                        OutlinedTextField(
-                            value = selectedGroupName,
-                            onValueChange = {},
-                            readOnly = true,
-                            label = { Text(getTypesString("group_id_opt", language)) },
-                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedGroupSelection) },
-                            colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(),
-                            modifier = Modifier.menuAnchor().fillMaxWidth(),
-                            singleLine = true
-                        )
-                        ExposedDropdownMenu(
-                            expanded = expandedGroupSelection,
-                            onDismissRequest = { expandedGroupSelection = false }
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text("None") },
-                                onClick = {
-                                    groupId = ""
-                                    expandedGroupSelection = false
-                                }
+                            buildGroupDropdownOptions(
+                                allGroups = allGroups,
+                                excludeId = initial?.id,
+                                language = language,
+                                allowRootOption = !isExistingChildGroup,
+                                filterTargetType = targetType.ifBlank { null }
                             )
-                            applicableGroups.forEach { grp ->
-                                DropdownMenuItem(
-                                    text = { Text(grp.name.formatGroupName(language)) },
-                                    onClick = {
-                                        groupId = grp.id.toString()
-                                        if (typeStr == "GroupSv" && !grp.targetType.isNullOrBlank()) {
-                                            targetType = grp.targetType!!
-                                        }
-                                        expandedGroupSelection = false
-                                    }
+                        }
+                    }
+                    var expandedGroupSelection by remember { mutableStateOf(false) }
+
+                    val selectedParentObj = remember(groupId, allGroups) {
+                        groupId.toIntOrNull()?.let { pId -> allGroups.find { it.id == pId } }
+                    }
+
+                    val selectedParentDisplay = when {
+                        isExistingRootGroup -> {
+                            if (language == AppLanguage.EN) "— Root Category (Domain) —" else "— Šakninė kategorija (Root) —"
+                        }
+                        !isChild || groupId.isBlank() || groupId == "0" -> {
+                            if (language == AppLanguage.EN) "— Root Category (Domain) —" else "— Šakninė kategorija (Root) —"
+                        }
+                        selectedParentObj != null -> {
+                            val indent = "    ".repeat(selectedParentObj.level ?: 0)
+                            val prefix = if ((selectedParentObj.level ?: 0) == 0) "📁 " else "└── 📁 "
+                            "$indent$prefix${selectedParentObj.name.formatGroupName(language)}"
+                        }
+                        else -> if (language == AppLanguage.EN) "Select parent folder..." else "Pasirinkite tėvinį aplanką..."
+                    }
+
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth().padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text("📁", style = MaterialTheme.typography.titleMedium)
+                                Text(
+                                    text = if (language == AppLanguage.EN) "Directory Placement (Parent Group)" else "Vieta katalogų struktūroje (Tėvinė grupė)",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary
                                 )
+                                Spacer(Modifier.weight(1f))
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Switch(checked = enabled, onCheckedChange = { enabled = it })
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(getTypesString("enabled", language), style = MaterialTheme.typography.bodyMedium)
+                                }
+                            }
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                if (isExistingRootGroup) {
+                                    OutlinedTextField(
+                                        value = selectedParentDisplay,
+                                        onValueChange = {},
+                                        readOnly = true,
+                                        enabled = false,
+                                        label = { Text(if (language == AppLanguage.EN) "Parent Folder" else "Tėvinis aplankas") },
+                                        trailingIcon = {
+                                            Icon(
+                                                Icons.Default.Lock,
+                                                contentDescription = "Fiksuota šaknis",
+                                                modifier = Modifier.size(18.dp),
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                                            )
+                                        },
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            disabledTextColor = MaterialTheme.colorScheme.onSurface,
+                                            disabledBorderColor = MaterialTheme.colorScheme.outlineVariant,
+                                            disabledLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            disabledTrailingIconColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                        ),
+                                        modifier = Modifier.weight(1.4f),
+                                        singleLine = true
+                                    )
+                                } else {
+                                    ExposedDropdownMenuBox(
+                                        expanded = expandedGroupSelection,
+                                        onExpandedChange = { expandedGroupSelection = !expandedGroupSelection },
+                                        modifier = Modifier.weight(1.4f)
+                                    ) {
+                                        OutlinedTextField(
+                                            value = selectedParentDisplay,
+                                            onValueChange = {},
+                                            readOnly = true,
+                                            label = { Text(if (language == AppLanguage.EN) "Parent Folder" else "Tėvinis aplankas") },
+                                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedGroupSelection) },
+                                            colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(),
+                                            modifier = Modifier.menuAnchor().fillMaxWidth(),
+                                            singleLine = true
+                                        )
+                                        ExposedDropdownMenu(
+                                            expanded = expandedGroupSelection,
+                                            onDismissRequest = { expandedGroupSelection = false }
+                                        ) {
+                                            groupDropdownOptions.forEach { opt ->
+                                                DropdownMenuItem(
+                                                    text = {
+                                                        Text(
+                                                            text = opt.displayName,
+                                                            fontWeight = if (opt.depth == 0) FontWeight.Bold else FontWeight.Normal,
+                                                            color = if (opt.group == null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                                        )
+                                                    },
+                                                    onClick = {
+                                                        if (opt.group == null) {
+                                                            groupId = ""
+                                                            isChild = false
+                                                        } else {
+                                                            groupId = opt.group.id?.toString() ?: ""
+                                                            isChild = true
+                                                            if (!opt.group.targetType.isNullOrBlank()) {
+                                                                targetType = opt.group.targetType!!
+                                                            }
+                                                        }
+                                                        expandedGroupSelection = false
+                                                        focusManager.clearFocus()
+                                                    }
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+
+                                if (isExistingRootGroup) {
+                                    OutlinedTextField(
+                                        value = targetType.toFriendlyTypeName(language),
+                                        onValueChange = {},
+                                        readOnly = true,
+                                        enabled = false,
+                                        label = { Text(getTypesString("target_type", language)) },
+                                        trailingIcon = {
+                                            Icon(
+                                                Icons.Default.Lock,
+                                                contentDescription = "Fiksuotas tipas",
+                                                modifier = Modifier.size(18.dp),
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                                            )
+                                        },
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            disabledTextColor = MaterialTheme.colorScheme.onSurface,
+                                            disabledBorderColor = MaterialTheme.colorScheme.outlineVariant,
+                                            disabledLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            disabledTrailingIconColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                        ),
+                                        modifier = Modifier.weight(1f),
+                                        singleLine = true
+                                    )
+                                } else if (!isChild) {
+                                    var expandedTargetType by remember { mutableStateOf(false) }
+                                    ExposedDropdownMenuBox(
+                                        expanded = expandedTargetType,
+                                        onExpandedChange = { expandedTargetType = !expandedTargetType },
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        OutlinedTextField(
+                                            value = if (targetType.isEmpty()) getTypesString("select_target_type", language) else targetType.toFriendlyTypeName(language),
+                                            onValueChange = {},
+                                            readOnly = true,
+                                            label = { Text(getTypesString("target_type", language)) },
+                                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedTargetType) },
+                                            colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(),
+                                            modifier = Modifier.menuAnchor().fillMaxWidth(),
+                                            singleLine = true
+                                        )
+                                        ExposedDropdownMenu(
+                                            expanded = expandedTargetType,
+                                            onDismissRequest = { expandedTargetType = false }
+                                        ) {
+                                            PredefinedTypeGroups.filter { it != "GroupSv" }.forEach { opt ->
+                                                DropdownMenuItem(
+                                                    text = { Text(opt.toFriendlyTypeName(language)) },
+                                                    onClick = {
+                                                        targetType = opt
+                                                        expandedTargetType = false
+                                                        focusManager.clearFocus()
+                                                    }
+                                                )
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    OutlinedTextField(
+                                        value = targetType.toFriendlyTypeName(language),
+                                        onValueChange = {},
+                                        readOnly = true,
+                                        enabled = false,
+                                        label = { Text(getTypesString("target_type", language)) },
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            disabledTextColor = MaterialTheme.colorScheme.onSurface,
+                                            disabledBorderColor = MaterialTheme.colorScheme.outlineVariant,
+                                            disabledLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            disabledTrailingIconColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                        ),
+                                        modifier = Modifier.weight(1f),
+                                        singleLine = true
+                                    )
+                                }
+                            }
+
+                            if (isExistingRootGroup) {
+                                Text(
+                                    text = if (language == AppLanguage.EN) "ℹ Level 0 root category cannot be reassigned to another branch"
+                                    else "ℹ 0 lygio šakninė grupė negali būti priskirta kitai atšakai",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                )
+                            } else if (isExistingChildGroup) {
+                                Text(
+                                    text = if (language == AppLanguage.EN) "ℹ Can only be organized within ${targetType.toFriendlyTypeName(language)} branch"
+                                    else "ℹ Galima keisti tik ${targetType.toFriendlyTypeName(language)} atšakos ribose",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                )
+                            }
+
+                            // Breadcrumbs / path preview
+                            val currentBreadcrumb = remember(groupId, targetType, isChild, allGroups, name, language) {
+                                val formattedCurrentName = name.formatGroupName(language).trim()
+                                if (groupId.isBlank() || groupId == "0" || !isChild) {
+                                    val rootDomain = targetType.ifBlank { "Root" }.toFriendlyTypeName(language)
+                                    val selfName = formattedCurrentName.ifBlank { rootDomain }
+                                    "📁 $selfName"
+                                } else {
+                                    val pId = groupId.toIntOrNull()
+                                    val parts = mutableListOf<String>()
+                                    var curr = allGroups.find { it.id == pId }
+                                    val visited = mutableSetOf<Int>()
+                                    while (curr != null && curr.id != null && !visited.contains(curr.id!!)) {
+                                        visited.add(curr.id!!)
+                                        parts.add(0, curr.name.formatGroupName(language))
+                                        curr = allGroups.find { it.id == curr?.parentGroupId }
+                                    }
+                                    val prefix = parts.joinToString(" > ") { "📁 $it" }
+                                    if (formattedCurrentName.isBlank()) prefix else "$prefix > 📁 $formattedCurrentName"
+                                }
+                            }
+
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = MaterialTheme.colorScheme.background,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = if (language == AppLanguage.EN) "Path:" else "Kelias:",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        text = currentBreadcrumb,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    AssistChip(
+                                        onClick = {},
+                                        label = {
+                                            Text(
+                                                if (language == AppLanguage.EN) "Level $computedLevel" else "Lygis $computedLevel",
+                                                style = MaterialTheme.typography.labelSmall
+                                            )
+                                        },
+                                        modifier = Modifier.height(28.dp)
+                                    )
+                                    if (targetType.isNotBlank()) {
+                                        Spacer(Modifier.width(4.dp))
+                                        AssistChip(
+                                            onClick = {},
+                                            label = {
+                                                Text(
+                                                    targetType.toFriendlyTypeName(language),
+                                                    style = MaterialTheme.typography.labelSmall
+                                                )
+                                            },
+                                            modifier = Modifier.height(28.dp)
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
+                } else {
+                    // Row 2: Grupė, Brūkšninis kodas / Matavimo vienetas, Switch'ai
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        var expandedGroupSelection by remember { mutableStateOf(false) }
+                        val productGroupOptions = remember(allGroups, typeStr, language) {
+                            buildGroupDropdownOptions(
+                                allGroups = allGroups,
+                                excludeId = null,
+                                language = language,
+                                allowRootOption = false,
+                                filterTargetType = typeStr
+                            )
+                        }
+
+                        val selectedGroupObj = remember(groupId, allGroups) {
+                            allGroups.find { it.id?.toString() == groupId } ?: rootGroupForEditor
+                        }
+                        val selectedGroupName = selectedGroupObj?.let { g ->
+                            val indent = "    ".repeat(g.level ?: 0)
+                            val prefix = if ((g.level ?: 0) == 0) "📁 " else "└── 📁 "
+                            "$indent$prefix${g.name.formatGroupName(language)}"
+                        } ?: if (groupId.isNotBlank() && groupId != "0") groupId else (rootGroupForEditor?.name?.formatGroupName(language) ?: "Pasirinkite grupę...")
+
+                        ExposedDropdownMenuBox(
+                            expanded = expandedGroupSelection,
+                            onExpandedChange = { expandedGroupSelection = !expandedGroupSelection },
+                            modifier = Modifier.weight(1.3f)
+                        ) {
+                            OutlinedTextField(
+                                value = selectedGroupName,
+                                onValueChange = {},
+                                readOnly = true,
+                                label = { Text(getTypesString("group_id_opt", language)) },
+                                trailingIcon = { 
+                                    ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedGroupSelection) 
+                                },
+                                colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(),
+                                modifier = Modifier.menuAnchor().fillMaxWidth(),
+                                singleLine = true
+                            )
+                            ExposedDropdownMenu(
+                                expanded = expandedGroupSelection,
+                                onDismissRequest = { expandedGroupSelection = false }
+                            ) {
+                                if (productGroupOptions.isEmpty()) {
+                                    if (rootGroupForEditor != null) {
+                                        DropdownMenuItem(
+                                            text = {
+                                                Text(
+                                                    text = "📁 " + rootGroupForEditor.name.formatGroupName(language),
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            },
+                                            onClick = {
+                                                groupId = rootGroupForEditor.id?.toString() ?: "0"
+                                                expandedGroupSelection = false
+                                            }
+                                        )
+                                    }
+                                } else {
+                                    productGroupOptions.forEach { opt ->
+                                        DropdownMenuItem(
+                                            text = {
+                                                Text(
+                                                    text = opt.displayName,
+                                                    fontWeight = if (opt.depth == 0) FontWeight.Bold else FontWeight.Normal
+                                                )
+                                            },
+                                            onClick = {
+                                                groupId = opt.group?.id?.toString() ?: "0"
+                                                expandedGroupSelection = false
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
 
                     if (typeStr in listOf("ProductSv", "ServiceSv", "LocationSv", "WarehouseSv", "DivisionSv", "UnitSv")) {
                         val isBarcodeError = validationErrors.containsKey("Brūkšninis kodas")
@@ -1498,79 +2705,9 @@ internal fun TypeEditorDialog(
                         Text(getTypesString("enabled", language), style = MaterialTheme.typography.bodyMedium)
                     }
                 }
+            }
 
-                // If type is GroupSv, show isChild and targetType fields
-                if (typeStr == "GroupSv") {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(end = 8.dp)
-                        ) {
-                            Switch(checked = isChild, onCheckedChange = { isChild = it })
-                            Spacer(Modifier.width(8.dp))
-                            Text(getTypesString("is_child", language))
-                        }
-
-                        OutlinedTextField(
-                            value = computedLevel.toString(),
-                            onValueChange = {},
-                            readOnly = true,
-                            enabled = false,
-                            label = { Text(if (language == AppLanguage.EN) "Level" else "Lygis") },
-                            colors = OutlinedTextFieldDefaults.colors(),
-                            modifier = Modifier.weight(1f),
-                            singleLine = true
-                        )
-
-                        if (!isChild && initial == null) {
-                            var expandedTargetType by remember { mutableStateOf(false) }
-                            ExposedDropdownMenuBox(
-                                expanded = expandedTargetType,
-                                onExpandedChange = { expandedTargetType = !expandedTargetType },
-                                modifier = Modifier.weight(1.5f)
-                            ) {
-                                OutlinedTextField(
-                                    value = if (targetType.isEmpty()) getTypesString("select_target_type", language) else targetType.toFriendlyTypeName(language),
-                                    onValueChange = {},
-                                    readOnly = true,
-                                    label = { Text(getTypesString("target_type", language)) },
-                                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedTargetType) },
-                                    colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(),
-                                    modifier = Modifier.menuAnchor().fillMaxWidth(),
-                                    singleLine = true
-                                )
-                                ExposedDropdownMenu(
-                                    expanded = expandedTargetType,
-                                    onDismissRequest = { expandedTargetType = false }
-                                ) {
-                                    PredefinedTypeGroups.filter { it != "GroupSv" }.forEach { opt ->
-                                        DropdownMenuItem(
-                                            text = { Text(opt.toFriendlyTypeName(language)) },
-                                            onClick = {
-                                                targetType = opt
-                                                expandedTargetType = false
-                                                focusManager.clearFocus()
-                                                
-                                                scope.launch {
-                                                    val res = apiClient.typeRepository.getAllByType(opt)
-                                                    if (res is com.suprogramuota_visata.api.domain.util.ApiResult.Success) {
-                                                        unassignedChildren = res.data.filter { it.groupId == null }
-                                                        checkedChildren.clear()
-                                                    }
-                                                }
-                                            }
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    if (!isChild && initial == null && unassignedChildren.isNotEmpty()) {
+            if (typeStr == "GroupSv" && !isChild && initial == null && unassignedChildren.isNotEmpty()) {
                         Text(getTypesString("unassigned_children", language), style = MaterialTheme.typography.titleSmall)
                         Card(modifier = Modifier.fillMaxWidth().heightIn(max = 200.dp)) {
                             LazyColumn(modifier = Modifier.fillMaxWidth().padding(8.dp)) {
@@ -1588,7 +2725,152 @@ internal fun TypeEditorDialog(
                             }
                         }
                     }
-                }
+
+                    if (typeStr == "GroupSv" && initial?.id != null) {
+                        val initialId = initial.id
+                        val directChildren = remember(allGroups, initialId) {
+                            if (initialId != null) {
+                                allGroups.filter { it.parentGroupId == initialId }
+                            } else emptyList()
+                        }
+
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Text(
+                                    text = if (language == AppLanguage.EN) "Child Groups (Subbranches)" else "Vaikinės grupės (Pošakiai)",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+
+                                if (directChildren.isEmpty()) {
+                                    Text(
+                                        text = if (language == AppLanguage.EN) "This group has no direct child groups yet." else "Ši grupė dar neturi tiesioginių vaikinių grupių.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                } else {
+                                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        directChildren.forEach { child ->
+                                            var showDeleteChildConfirm by remember { mutableStateOf(false) }
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = "↳ ${child.name.formatGroupName(language)}",
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    fontWeight = FontWeight.Medium,
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                                SuggestionChip(
+                                                    onClick = {},
+                                                    label = { Text("Lygis ${child.level ?: 1}") },
+                                                    modifier = Modifier.padding(end = 8.dp)
+                                                )
+                                                IconButton(
+                                                    onClick = { showDeleteChildConfirm = true },
+                                                    modifier = Modifier.size(32.dp)
+                                                ) {
+                                                    Icon(
+                                                        Icons.Default.Delete,
+                                                        contentDescription = "Ištrinti pošakį",
+                                                        tint = MaterialTheme.colorScheme.error,
+                                                        modifier = Modifier.size(18.dp)
+                                                    )
+                                                }
+                                            }
+
+                                            if (showDeleteChildConfirm) {
+                                                AlertDialog(
+                                                    onDismissRequest = { showDeleteChildConfirm = false },
+                                                    title = { Text("Trinti vaikinę grupę") },
+                                                    text = { Text("Ar tikrai norite ištrinti „${child.name}\"?") },
+                                                    confirmButton = {
+                                                        Button(
+                                                            onClick = {
+                                                                showDeleteChildConfirm = false
+                                                                scope.launch {
+                                                                    val childId = child.id
+                                                                    if (childId != null) {
+                                                                        apiClient.typeRepository.delete(childId, child.type)
+                                                                        onReloadGroups?.invoke()
+                                                                    }
+                                                                }
+                                                            },
+                                                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                                                        ) { Text("Ištrinti") }
+                                                    },
+                                                    dismissButton = {
+                                                        TextButton(onClick = { showDeleteChildConfirm = false }) { Text("Atšaukti") }
+                                                    }
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+
+                                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+
+                                var quickChildName by remember { mutableStateOf("") }
+                                var isQuickAdding by remember { mutableStateOf(false) }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    OutlinedTextField(
+                                        value = quickChildName,
+                                        onValueChange = { quickChildName = it },
+                                        label = { Text(if (language == AppLanguage.EN) "New child group name" else "Naujo pošakio pavadinimas") },
+                                        singleLine = true,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Button(
+                                        onClick = {
+                                            if (quickChildName.isNotBlank() && initialId != null) {
+                                                isQuickAdding = true
+                                                scope.launch {
+                                                    val newChild = TypeDTO(
+                                                        name = quickChildName.trim(),
+                                                        type = "GroupSv",
+                                                        isChild = true,
+                                                        parentGroupId = initialId,
+                                                        groupId = null,
+                                                        level = (initial.level ?: 0) + 1,
+                                                        targetType = initial.targetType,
+                                                        enabled = true,
+                                                        attributes = emptyList()
+                                                    )
+                                                    val res = apiClient.typeRepository.create(newChild)
+                                                    if (res is com.suprogramuota_visata.api.domain.util.ApiResult.Success) {
+                                                        quickChildName = ""
+                                                        onReloadGroups?.invoke()
+                                                    }
+                                                    isQuickAdding = false
+                                                }
+                                            }
+                                        },
+                                        modifier = Modifier.height(56.dp),
+                                        enabled = quickChildName.isNotBlank() && !isQuickAdding
+                                    ) {
+                                        if (isQuickAdding) {
+                                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                        } else {
+                                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                                            Spacer(Modifier.width(4.dp))
+                                            Text(if (language == AppLanguage.EN) "Add child" else "Pridėti pošakį")
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
 
                 HorizontalDivider()
                 Row(
@@ -1934,8 +3216,12 @@ internal fun TypeEditorDialog(
                                 id = initial?.id,
                                 name = name,
                                 groupId = if (typeStr == "GroupSv") null else groupId.toIntOrNull(),
-                                parentGroupId = if (typeStr == "GroupSv") groupId.toIntOrNull() else null,
-                                level = if (typeStr == "GroupSv") computedLevel else null,
+                                parentGroupId = if (typeStr == "GroupSv") {
+                                    if (isChild) groupId.toIntOrNull() else null
+                                } else null,
+                                level = if (typeStr == "GroupSv") {
+                                    if (isChild) computedLevel else 0
+                                } else null,
                                 enabled = enabled,
                                 type = typeStr,
                                 isChild = if (typeStr == "GroupSv") isChild else null,

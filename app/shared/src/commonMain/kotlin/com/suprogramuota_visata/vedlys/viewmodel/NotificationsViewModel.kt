@@ -99,9 +99,11 @@ class NotificationsViewModel(private val apiClient: ApiSvClient) : BaseViewModel
         val msg = allMessages.find { it.id == id }
         if (msg != null) {
             val relatedIds = allMessages.filter {
-                it.timestamp <= msg.timestamp &&
-                (it.senderId == msg.senderId || it.receiverId == msg.senderId ||
-                 it.senderId == msg.receiverId || it.receiverId == msg.receiverId)
+                it.timestamp <= msg.timestamp && (
+                    it.id == msg.id ||
+                    (it.senderId == msg.senderId && it.receiverId == msg.receiverId) ||
+                    (msg.receiverId != null && (it.senderId == msg.receiverId || it.receiverId == msg.receiverId))
+                )
             }.map { it.id }
             AppSettings.addReadMessageIds(relatedIds + id)
         } else {
