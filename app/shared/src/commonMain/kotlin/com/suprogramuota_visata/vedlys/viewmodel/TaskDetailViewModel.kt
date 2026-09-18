@@ -36,6 +36,19 @@ class TaskDetailViewModel(
     var transaction by mutableStateOf<TransactionDTO?>(null)
         private set
 
+    var selectedGroup by mutableStateOf("Financial")
+        private set
+
+    fun getOwnerTypeForGroup(group: String): String {
+        return when (group) {
+            "Financial" -> "FinancialTransactionSv"
+            "Operational" -> "OperationalTransactionSv"
+            "Delivery" -> "DeliveryTransactionSv"
+            "CRM" -> "CrmTransactionSv"
+            else -> "TransactionSv"
+        }
+    }
+
     var extTemplate by mutableStateOf<ExtTemplateDTO?>(null)
         private set
 
@@ -56,7 +69,7 @@ class TaskDetailViewModel(
         loadTask()
     }
 
-    private fun getGroupForDocumentType(docType: String): String {
+    fun getGroupForDocumentType(docType: String): String {
         val typeEnum = com.suprogramuota_visata.enums.DocumentType.fromId(docType)
         if (typeEnum != null) {
             return when (typeEnum.category) {
@@ -74,6 +87,74 @@ class TaskDetailViewModel(
         }
     }
 
+    fun loadTemplatesForGroup(group: String, keepCurrentIfMatches: Boolean = false) {
+        val groupOwnerType = getOwnerTypeForGroup(group)
+        scope.launch {
+            val groupTplResult = apiClient.extTemplateRepository.getTemplatesByOwnerType(groupOwnerType)
+            val generalTplResult = apiClient.extTemplateRepository.getTemplatesByOwnerType("TransactionSv")
+
+            val groupTpls = if (groupTplResult.isSuccess) groupTplResult.getOrNull() ?: emptyList() else emptyList()
+            val generalTpls = if (generalTplResult.isSuccess) generalTplResult.getOrNull() ?: emptyList() else emptyList()
+
+            val combined = (groupTpls + generalTpls).distinctBy { it.id }
+            availableTemplates = if (groupTpls.isNotEmpty()) groupTpls else combined
+
+            val currentTplId = extTemplate?.id ?: transaction?.extTemplateId
+            val matched = availableTemplates.find { it.id == currentTplId }
+            if (matched != null && keepCurrentIfMatches) {
+                extTemplate = matched
+            } else {
+                val defaultTpl = availableTemplates.find { it.isDefault } ?: availableTemplates.firstOrNull()
+                if (defaultTpl != null) {
+                    changeTemplate(defaultTpl)
+                }
+            }
+        }
+    }
+
+    fun selectGroup(newGroup: String) {
+        if (selectedGroup == newGroup) return
+        selectedGroup = newGroup
+
+        val groupDocTypes = when (newGroup) {
+            "Financial" -> com.suprogramuota_visata.enums.DocumentType.getByCategory(com.suprogramuota_visata.enums.DocumentCategory.FINANCIAL).map { it.id }
+            "Operational" -> com.suprogramuota_visata.enums.DocumentType.getByCategory(com.suprogramuota_visata.enums.DocumentCategory.OPERATIONAL).map { it.id }
+            "Delivery" -> com.suprogramuota_visata.enums.DocumentType.getByCategory(com.suprogramuota_visata.enums.DocumentCategory.DELIVERY).map { it.id }
+            "CRM" -> com.suprogramuota_visata.enums.DocumentType.getByCategory(com.suprogramuota_visata.enums.DocumentCategory.CRM).map { it.id }
+            else -> com.suprogramuota_visata.enums.DocumentType.entries.map { it.id }
+        }
+
+        loadTemplatesForGroup(newGroup)
+
+        val currentTx = transaction ?: return
+        val currentDocType = currentTx.documentType
+        if (!groupDocTypes.contains(currentDocType)) {
+            val newDocType = groupDocTypes.firstOrNull() ?: currentDocType
+            if (isDraft) {
+                val nextNum = AppSettings.generateNextDocumentNumber(newGroup)
+                val syncedAttrs = currentTx.attributes.map { attr ->
+                    if (attr.name == "Dokumento numeris") attr.copy(value = nextNum) else attr
+                }
+                transaction = currentTx.copy(
+                    documentType = newDocType,
+                    documentNumber = nextNum,
+                    attributes = syncedAttrs
+                )
+            } else {
+                updateDocumentType(newDocType)
+            }
+        } else if (isDraft) {
+            val nextNum = AppSettings.generateNextDocumentNumber(newGroup)
+            val syncedAttrs = currentTx.attributes.map { attr ->
+                if (attr.name == "Dokumento numeris") attr.copy(value = nextNum) else attr
+            }
+            transaction = currentTx.copy(
+                documentNumber = nextNum,
+                attributes = syncedAttrs
+            )
+        }
+    }
+
     fun loadTask() {
         if (isLoading) return
         isLoading = true
@@ -81,7 +162,8 @@ class TaskDetailViewModel(
 
         scope.launch {
             if (taskId.equals("new", ignoreCase = true)) {
-                val groupCat = getGroupForDocumentType("SALES_INVOICE")
+                selectedGroup = "Financial"
+                val groupCat = selectedGroup
                 var nextDocNum = AppSettings.generateNextDocumentNumber(groupCat)
 
                 val allTxResult = apiClient.transactionRepository.getTransactions()
@@ -117,18 +199,22 @@ class TaskDetailViewModel(
 
                 var initialAttributes = emptyList<AttributeDTO>()
                 var defaultTplId: Int? = null
-                val tplListResult = apiClient.extTemplateRepository.getTemplatesByOwnerType("TransactionSv")
-                if (tplListResult.isSuccess) {
-                    val templates = tplListResult.getOrNull() ?: emptyList()
-                    availableTemplates = templates
-                    val defaultTpl = templates.find { it.isDefault } ?: templates.firstOrNull()
-                    if (defaultTpl != null) {
-                        extTemplate = defaultTpl
-                        defaultTplId = defaultTpl.id?.toInt()
-                    }
+                val groupOwnerType = getOwnerTypeForGroup(selectedGroup)
+                val groupTplResult = apiClient.extTemplateRepository.getTemplatesByOwnerType(groupOwnerType)
+                val generalTplResult = apiClient.extTemplateRepository.getTemplatesByOwnerType("TransactionSv")
+
+                val groupTpls = if (groupTplResult.isSuccess) groupTplResult.getOrNull() ?: emptyList() else emptyList()
+                val generalTpls = if (generalTplResult.isSuccess) generalTplResult.getOrNull() ?: emptyList() else emptyList()
+                val combined = (groupTpls + generalTpls).distinctBy { it.id }
+                availableTemplates = if (groupTpls.isNotEmpty()) groupTpls else combined
+
+                val defaultTpl = availableTemplates.find { it.isDefault } ?: availableTemplates.firstOrNull()
+                if (defaultTpl != null) {
+                    extTemplate = defaultTpl
+                    defaultTplId = defaultTpl.id?.toInt()
                 }
 
-                val templateAttrs = ensureStandardFields("TransactionSv", extTemplate?.attributes ?: emptyList())
+                val templateAttrs = ensureStandardFields(groupOwnerType, extTemplate?.attributes ?: emptyList())
                 initialAttributes = templateAttrs.map { ext ->
                     AttributeDTO(
                         name = ext.name,
@@ -174,12 +260,17 @@ class TaskDetailViewModel(
                     var loadedTx = txResult.data
                     if (loadedTx != null) {
                         isDraft = false
+                        selectedGroup = getGroupForDocumentType(loadedTx.documentType)
                         var tplId = loadedTx.extTemplateId
                         var tplChanged = false
-                        val tplListResult = apiClient.extTemplateRepository.getTemplatesByOwnerType("TransactionSv")
-                        if (tplListResult.isSuccess) {
-                            availableTemplates = tplListResult.getOrNull() ?: emptyList()
-                        }
+                        val groupOwnerType = getOwnerTypeForGroup(selectedGroup)
+                        val groupTplResult = apiClient.extTemplateRepository.getTemplatesByOwnerType(groupOwnerType)
+                        val generalTplResult = apiClient.extTemplateRepository.getTemplatesByOwnerType("TransactionSv")
+
+                        val groupTpls = if (groupTplResult.isSuccess) groupTplResult.getOrNull() ?: emptyList() else emptyList()
+                        val generalTpls = if (generalTplResult.isSuccess) generalTplResult.getOrNull() ?: emptyList() else emptyList()
+                        val combined = (groupTpls + generalTpls).distinctBy { it.id }
+                        availableTemplates = if (groupTpls.isNotEmpty()) groupTpls else combined
                         if (tplId == null) {
                             val defaultTpl = availableTemplates.find { it.isDefault } ?: availableTemplates.firstOrNull()
                             if (defaultTpl != null) {

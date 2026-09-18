@@ -108,6 +108,42 @@ val PredefinedStandardFields = mapOf(
         StandardFieldInfo("Iš Padalinio", "STRING"),
         StandardFieldInfo("Į Padalinį", "STRING")
     ),
+    "FinancialTransactionSv" to listOf(
+        StandardFieldInfo("Dokumento numeris", "STRING"),
+        StandardFieldInfo("Dokumento data", "DATE_TIME"),
+        StandardFieldInfo("Partneris", "STRING"),
+        StandardFieldInfo("Iš Sandėlio", "STRING"),
+        StandardFieldInfo("Į Sandėlį", "STRING"),
+        StandardFieldInfo("Iš Padalinio", "STRING"),
+        StandardFieldInfo("Į Padalinį", "STRING")
+    ),
+    "OperationalTransactionSv" to listOf(
+        StandardFieldInfo("Dokumento numeris", "STRING"),
+        StandardFieldInfo("Dokumento data", "DATE_TIME"),
+        StandardFieldInfo("Partneris", "STRING"),
+        StandardFieldInfo("Iš Sandėlio", "STRING"),
+        StandardFieldInfo("Į Sandėlį", "STRING"),
+        StandardFieldInfo("Iš Padalinio", "STRING"),
+        StandardFieldInfo("Į Padalinį", "STRING")
+    ),
+    "DeliveryTransactionSv" to listOf(
+        StandardFieldInfo("Dokumento numeris", "STRING"),
+        StandardFieldInfo("Dokumento data", "DATE_TIME"),
+        StandardFieldInfo("Partneris", "STRING"),
+        StandardFieldInfo("Iš Sandėlio", "STRING"),
+        StandardFieldInfo("Į Sandėlį", "STRING"),
+        StandardFieldInfo("Iš Padalinio", "STRING"),
+        StandardFieldInfo("Į Padalinį", "STRING")
+    ),
+    "CrmTransactionSv" to listOf(
+        StandardFieldInfo("Dokumento numeris", "STRING"),
+        StandardFieldInfo("Dokumento data", "DATE_TIME"),
+        StandardFieldInfo("Partneris", "STRING"),
+        StandardFieldInfo("Iš Sandėlio", "STRING"),
+        StandardFieldInfo("Į Sandėlį", "STRING"),
+        StandardFieldInfo("Iš Padalinio", "STRING"),
+        StandardFieldInfo("Į Padalinį", "STRING")
+    ),
     "FinancialTransactionDetailSv" to listOf(
         StandardFieldInfo("Matas", "STRING"),
         StandardFieldInfo("Sandėlis", "WarehouseSv"),

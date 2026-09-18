@@ -491,7 +491,7 @@ Kaina: 15.00 EUR$txtAttr"""
     "code": "PR-0001",
     "barcode": "4770000000000",
     "baseUnit": "vnt.",
-    "conversionFactor": 1.0,
+    "conversionFactor": 1,
     "price": 15.00$attributesField
   }
 ]"""

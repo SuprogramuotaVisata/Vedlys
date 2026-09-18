@@ -190,6 +190,10 @@ class TypesViewModel(private val apiClient: ApiSvClient) : BaseViewModel() {
             errorMessage = "Įrašas neturi ID."
             return
         }
+        if (com.suprogramuota_visata.vedlys.ui.screens.isProtectedSystemItem(item, typeName)) {
+            errorMessage = "Pagrindinis matavimo vienetas '${item.name}' yra sisteminis ir negali būti pašalintas."
+            return
+        }
         scope.launch {
             isLoading = true
             errorMessage = null
@@ -210,7 +214,7 @@ class TypesViewModel(private val apiClient: ApiSvClient) : BaseViewModel() {
     }
 
     fun toggleSelectAll() {
-        val currentIds = items.mapNotNull { it.id }.toSet()
+        val currentIds = items.filter { !com.suprogramuota_visata.vedlys.ui.screens.isProtectedSystemItem(it, typeName) }.mapNotNull { it.id }.toSet()
         selectedItemIds = if (currentIds.isNotEmpty() && selectedItemIds.containsAll(currentIds)) {
             emptySet()
         } else {
@@ -219,6 +223,10 @@ class TypesViewModel(private val apiClient: ApiSvClient) : BaseViewModel() {
     }
 
     fun toggleSelectItem(id: Int) {
+        val item = allItems.find { it.id == id }
+        if (item != null && com.suprogramuota_visata.vedlys.ui.screens.isProtectedSystemItem(item, typeName)) {
+            return
+        }
         selectedItemIds = if (selectedItemIds.contains(id)) {
             selectedItemIds - id
         } else {
@@ -231,9 +239,17 @@ class TypesViewModel(private val apiClient: ApiSvClient) : BaseViewModel() {
     }
 
     fun deleteSelected() {
-        val idsToDelete = selectedItemIds.toList()
-        if (idsToDelete.isEmpty()) return
         val currentType = typeName
+        val itemsToDelete = allItems.filter { it.id in selectedItemIds }
+        val (protectedItems, allowedItems) = itemsToDelete.partition { com.suprogramuota_visata.vedlys.ui.screens.isProtectedSystemItem(it, currentType) }
+        val idsToDelete = allowedItems.mapNotNull { it.id }
+        if (idsToDelete.isEmpty()) {
+            if (protectedItems.isNotEmpty()) {
+                errorMessage = "Pažymėti įrašai yra sisteminiai ir negali būti ištrinti."
+            }
+            selectedItemIds = emptySet()
+            return
+        }
         
         scope.launch {
             isLoading = true

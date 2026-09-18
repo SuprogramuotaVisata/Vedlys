@@ -5,7 +5,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -20,6 +23,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.suprogramuota_visata.api.ApiSvClient
 import com.suprogramuota_visata.api.domain.models.*
 import com.suprogramuota_visata.api.domain.util.ApiResult
@@ -52,27 +56,85 @@ import com.suprogramuota_visata.vedlys.utils.validateFieldValue
 import com.suprogramuota_visata.vedlys.ui.components.PredefinedStandardFields
 
 fun getTranslatedUnitName(code: String, name: String, language: AppLanguage): String {
+    val cleanCode = code.trim().lowercase()
+    val cleanName = name.trim().lowercase()
     return if (language == AppLanguage.EN) {
-        when (code) {
-            "PCE" -> "pcs"
-            "KGM" -> "kg"
-            "LTR" -> "l"
-            "MTR" -> "m"
-            "BOX12" -> "Box (12 pcs)"
-            "BAG50" -> "Bag (50 kg)"
+        when {
+            cleanCode in setOf("pcs", "pce", "vnt", "vnt.") || cleanName in setOf("vienetas", "vnt.", "vnt", "pcs") -> "Piece"
+            cleanCode in setOf("kg", "kgm") || cleanName in setOf("kilogramas", "kg") -> "Kilogram"
+            cleanCode in setOf("l", "ltr") || cleanName in setOf("litras", "l") -> "Liter"
+            cleanCode in setOf("m", "mtr") || cleanName in setOf("metras", "m") -> "Meter"
+            cleanCode == "m2" || cleanName in setOf("kvadratinis metras", "m2") -> "Square meter"
+            cleanCode == "m3" || cleanName in setOf("kūbinis metras", "kubinis metras", "m3") -> "Cubic meter"
+            cleanCode == "box12" -> "Box (12 pcs)"
+            cleanCode == "bag50" -> "Bag (50 kg)"
             else -> name
         }
     } else {
-        when (code) {
-            "PCE" -> "vnt."
-            "KGM" -> "kg"
-            "LTR" -> "l"
-            "MTR" -> "m"
-            "BOX12" -> "Dėžutė (12 vnt.)"
-            "BAG50" -> "Maišas (50 kg)"
+        when {
+            cleanCode in setOf("pcs", "pce", "vnt", "vnt.") || cleanName in setOf("piece", "unit", "pcs") -> "Vienetas"
+            cleanCode in setOf("kg", "kgm") || cleanName in setOf("kilogram", "kg") -> "Kilogramas"
+            cleanCode in setOf("l", "ltr") || cleanName in setOf("liter", "l") -> "Litras"
+            cleanCode in setOf("m", "mtr") || cleanName in setOf("meter", "m") -> "Metras"
+            cleanCode == "m2" || cleanName in setOf("square meter", "m2") -> "Kvadratinis metras"
+            cleanCode == "m3" || cleanName in setOf("cubic meter", "m3") -> "Kūbinis metras"
+            cleanCode == "box12" -> "Dėžutė (12 vnt.)"
+            cleanCode == "bag50" -> "Maišas (50 kg)"
             else -> name
         }
     }
+}
+
+fun getUnitCode(code: String?, name: String): String {
+    val cleanCode = code?.trim()?.lowercase() ?: ""
+    val cleanName = name.trim().lowercase()
+    return when {
+        cleanCode in setOf("pcs", "pce", "vnt", "vnt.") || cleanName in setOf("vienetas", "piece", "unit") -> "pcs"
+        cleanCode in setOf("kg", "kgm") || cleanName in setOf("kilogramas", "kilogram") -> "kg"
+        cleanCode in setOf("l", "ltr") || cleanName in setOf("litras", "liter") -> "ltr"
+        cleanCode in setOf("m", "mtr") || cleanName in setOf("metras", "meter") -> "m"
+        cleanCode == "m2" || cleanName in setOf("kvadratinis metras", "square meter") -> "m2"
+        cleanCode == "m3" || cleanName in setOf("kūbinis metras", "kubinis metras", "cubic meter") -> "m3"
+        code?.isNotBlank() == true -> code
+        else -> name
+    }
+}
+
+fun isUnitPcsBased(unitStr: String, unitsList: List<TypeDTO>): Boolean {
+    val trimmed = unitStr.trim()
+    val unit = unitsList.find {
+        it.code?.trim()?.equals(trimmed, ignoreCase = true) == true ||
+        it.name.trim().equals(trimmed, ignoreCase = true) ||
+        getTranslatedUnitName(it.code ?: "", it.name, AppLanguage.LT).equals(trimmed, ignoreCase = true) ||
+        getTranslatedUnitName(it.code ?: "", it.name, AppLanguage.EN).equals(trimmed, ignoreCase = true)
+    }
+    if (unit == null) {
+        val lower = trimmed.lowercase()
+        return lower in setOf("pcs", "pce", "vnt", "vnt.", "vienetas", "piece")
+    }
+    var currentBaseId = unit.baseUnitId
+    var rootCode = getUnitCode(unit.code, unit.name)
+    val visited = mutableSetOf<Int>()
+    while (currentBaseId != null && visited.add(currentBaseId)) {
+        val parent = unitsList.find { it.id == currentBaseId }
+        if (parent != null) {
+            rootCode = getUnitCode(parent.code, parent.name)
+            currentBaseId = parent.baseUnitId
+        } else {
+            break
+        }
+    }
+    return rootCode == "pcs"
+}
+
+fun getUnitMaxDecimals(unitStr: String, unitsList: List<TypeDTO>): Int {
+    val trimmed = unitStr.trim()
+    val unit = unitsList.find {
+        it.code?.trim()?.equals(trimmed, ignoreCase = true) == true ||
+        it.name.trim().equals(trimmed, ignoreCase = true)
+    }
+    val factor = unit?.conversionFactor?.toInt() ?: 1
+    return if (factor >= 10) factor.toString().length - 1 else 3
 }
 
 private fun round2(v: Double): Double = Math.round(v * 100.0) / 100.0
@@ -529,6 +591,7 @@ private fun TransactionDetailsSection(
 ) {
     val scope = rememberCoroutineScope()
     val detailGroup = getGroupForDocumentType(transaction.documentType)
+    val language by com.suprogramuota_visata.vedlys.AppSettings.selectedLanguage.collectAsState()
 
     // Inline Fast Entry State
     var itemKind by remember { mutableStateOf(if (detailGroup == "CRM") "Service" else "Product") }
@@ -537,7 +600,7 @@ private fun TransactionDetailsSection(
     var typeEditorError by remember { mutableStateOf<String?>(null) }
     var allGroupsList by remember { mutableStateOf<List<TypeDTO>>(emptyList()) }
     var quantityStr by remember { mutableStateOf("1") }
-    var matasStr by remember { mutableStateOf("vnt.") }
+    var matasStr by remember { mutableStateOf("pcs") }
     var unitsList by remember { mutableStateOf<List<TypeDTO>>(emptyList()) }
     var matasDropdownExpanded by remember { mutableStateOf(false) }
     var priceExStr by remember { mutableStateOf("0.0") }
@@ -826,14 +889,35 @@ private fun TransactionDetailsSection(
                             )
 
                             // 2. Kiekis
+                            val isPcs = remember(matasStr, unitsList) { isUnitPcsBased(matasStr, unitsList) }
                             SelectAllOutlinedTextField(
                                 value = quantityStr,
-                                onValueChange = {
-                                    quantityStr = it
-                                    recalcSums(it, priceExStr, vatRateStr)
+                                onValueChange = { input ->
+                                    val filtered = if (isPcs) {
+                                        input.filter { it.isDigit() }
+                                    } else {
+                                        val maxDec = getUnitMaxDecimals(matasStr, unitsList)
+                                        val normalized = input.replace(',', '.')
+                                        val dotCount = normalized.count { it == '.' }
+                                        if (dotCount <= 1 && normalized.all { it.isDigit() || it == '.' }) {
+                                            val parts = normalized.split('.')
+                                            if (parts.size > 1 && parts[1].length > maxDec) {
+                                                "${parts[0]}.${parts[1].take(maxDec)}"
+                                            } else {
+                                                normalized
+                                            }
+                                        } else {
+                                            quantityStr
+                                        }
+                                    }
+                                    quantityStr = filtered
+                                    recalcSums(filtered, priceExStr, vatRateStr)
                                 },
                                 label = { Text("Kiekis") },
                                 singleLine = true,
+                                keyboardOptions = KeyboardOptions(
+                                    keyboardType = if (isPcs) KeyboardType.Number else KeyboardType.Decimal
+                                ),
                                 modifier = Modifier
                                     .weight(0.8f)
                                     .focusRequester(qtyFocusRequester)
@@ -845,7 +929,7 @@ private fun TransactionDetailsSection(
                                     }
                             )
 
-                            // 3. Matas (pasirinkimas iš matavimo vienetų sąrašo arba laisvas įvedimas)
+                            // 3. Matas (pasirinkimas iš matavimo vienetų sąrašo)
                             ExposedDropdownMenuBox(
                                 expanded = matasDropdownExpanded,
                                 onExpandedChange = { matasDropdownExpanded = !matasDropdownExpanded },
@@ -870,25 +954,30 @@ private fun TransactionDetailsSection(
                                                 priceFocusRequester.requestFocus()
                                                 true
                                             } else false
-                                        }
+                                        },
+                                    readOnly = true
                                 )
                                 ExposedDropdownMenu(
                                     expanded = matasDropdownExpanded,
                                     onDismissRequest = { matasDropdownExpanded = false }
                                 ) {
-                                    val availableUnits = remember(unitsList) {
+                                    val availableUnits = remember(unitsList, language) {
                                         if (unitsList.isNotEmpty()) {
                                             unitsList.map { u ->
-                                                val shortCode = getTranslatedUnitName(u.code ?: "", u.name, com.suprogramuota_visata.vedlys.AppLanguage.LT)
-                                                val displayLabel = if (u.name.isNotBlank() && !u.name.equals(shortCode, ignoreCase = true)) {
-                                                    "$shortCode (${u.name})"
+                                                val uCode = getUnitCode(u.code, u.name)
+                                                val transName = getTranslatedUnitName(u.code ?: "", u.name, language)
+                                                val displayLabel = if (transName.isNotBlank() && !transName.equals(uCode, ignoreCase = true)) {
+                                                    "$uCode ($transName)"
                                                 } else {
-                                                    shortCode
+                                                    uCode
                                                 }
-                                                shortCode to displayLabel
+                                                uCode to displayLabel
                                             }
                                         } else {
-                                            listOf("vnt.", "kg", "l", "m", "kompl.", "val.", "d.").map { it to it }
+                                            listOf("pcs", "kg", "m", "m2", "m3", "ltr").map { code ->
+                                                val trans = getTranslatedUnitName(code, code, language)
+                                                code to "$code ($trans)"
+                                            }
                                         }
                                     }
 
@@ -898,6 +987,11 @@ private fun TransactionDetailsSection(
                                             onClick = {
                                                 matasStr = shortCode
                                                 matasDropdownExpanded = false
+                                                if (isUnitPcsBased(shortCode, unitsList)) {
+                                                    val intVal = quantityStr.toDoubleOrNull()?.toInt()?.toString() ?: "1"
+                                                    quantityStr = intVal
+                                                    recalcSums(intVal, priceExStr, vatRateStr)
+                                                }
                                                 scope.launch {
                                                     delay(50)
                                                     priceFocusRequester.requestFocus()
@@ -1087,6 +1181,105 @@ private fun TransactionDetailsSection(
 }
 }
 
+private data class GroupOption(
+    val key: String,
+    val primary: String,
+    val secondary: String,
+    val icon: androidx.compose.ui.graphics.vector.ImageVector
+)
+
+@Composable
+private fun GroupSwitcherRow(
+    selectedGroup: String,
+    onGroupSelect: (String) -> Unit,
+    enabled: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val language by AppSettings.selectedLanguage.collectAsState()
+    val isLt = language == AppLanguage.LT
+
+    val groups = remember(isLt) {
+        listOf(
+            GroupOption(
+                key = "Financial",
+                primary = if (isLt) "Finansai" else "Financial",
+                secondary = if (isLt) "Financial" else "Finance",
+                icon = Icons.Default.AccountBalance
+            ),
+            GroupOption(
+                key = "Operational",
+                primary = if (isLt) "Operacijos" else "Operational",
+                secondary = if (isLt) "Operational" else "Operations",
+                icon = Icons.Default.Build
+            ),
+            GroupOption(
+                key = "Delivery",
+                primary = if (isLt) "Pristatymas" else "Delivery",
+                secondary = if (isLt) "Delivery" else "Logistics",
+                icon = Icons.Default.LocalShipping
+            ),
+            GroupOption(
+                key = "CRM",
+                primary = "CRM",
+                secondary = if (isLt) "Klientai" else "Clients",
+                icon = Icons.Default.Groups
+            )
+        )
+    }
+
+    Row(
+        modifier = modifier.horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        groups.forEach { option ->
+            val isSelected = option.key.equals(selectedGroup, ignoreCase = true)
+            Surface(
+                onClick = { if (enabled) onGroupSelect(option.key) },
+                shape = RoundedCornerShape(10.dp),
+                color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
+                border = BorderStroke(
+                    width = if (isSelected) 2.dp else 1.dp,
+                    color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
+                ),
+                enabled = enabled,
+                tonalElevation = if (isSelected) 3.dp else 0.dp,
+                modifier = Modifier.defaultMinSize(minWidth = 145.dp, minHeight = 44.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Icon(
+                        imageVector = option.icon,
+                        contentDescription = option.primary,
+                        modifier = Modifier.size(20.dp),
+                        tint = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Column(
+                        verticalArrangement = Arrangement.Center,
+                        horizontalAlignment = Alignment.Start
+                    ) {
+                        Text(
+                            text = option.primary,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                            color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = option.secondary,
+                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun TransactionHeaderCard(
@@ -1238,14 +1431,14 @@ private fun TransactionHeaderCard(
         activeFields.add("Dokumento data" to dateVal)
 
         val partnerVal = transaction.attributes.find { it.name == "Partneris" }?.value ?: ""
-        val whFromVal = transaction.attributes.find { it.name == "Iš Sandėlio" }?.value ?: ""
-        val whToVal = transaction.attributes.find { it.name == "Į Sandėlį" }?.value ?: ""
+        val whFromVal = transaction.attributes.find { it.name == "Iš Saugyklos" || it.name == "Iš Sandėlio" }?.value ?: ""
+        val whToVal = transaction.attributes.find { it.name == "Į Saugyklą" || it.name == "Į Sandėlį" }?.value ?: ""
         val deptFromVal = transaction.attributes.find { it.name == "Iš Padalinio" }?.value ?: ""
         val deptToVal = transaction.attributes.find { it.name == "Į Padalinį" }?.value ?: ""
 
         activeFields.add("Partneris" to partnerVal)
-        activeFields.add("Iš Sandėlio" to whFromVal)
-        activeFields.add("Į Sandėlį" to whToVal)
+        activeFields.add("Iš Saugyklos" to whFromVal)
+        activeFields.add("Į Saugyklą" to whToVal)
         activeFields.add("Iš Padalinio" to deptFromVal)
         activeFields.add("Į Padalinį" to deptToVal)
 
@@ -1266,8 +1459,8 @@ private fun TransactionHeaderCard(
                     "Dokumento numeris" -> focusRequesterDocNum
                     "Dokumento data" -> focusRequesterDocDate
                     "Partneris" -> focusRequesterPartner
-                    "Iš Sandėlio" -> focusRequesterWhFrom
-                    "Į Sandėlį" -> focusRequesterWhTo
+                    "Iš Saugyklos", "Iš Sandėlio" -> focusRequesterWhFrom
+                    "Į Saugyklą", "Į Sandėlį" -> focusRequesterWhTo
                     "Iš Padalinio" -> focusRequesterDeptFrom
                     "Į Padalinį" -> focusRequesterDeptTo
                     else -> {
@@ -1297,7 +1490,6 @@ private fun TransactionHeaderCard(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { onToggleExpand() }
                     .padding(16.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
@@ -1305,7 +1497,7 @@ private fun TransactionHeaderCard(
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.weight(1f, fill = false)
+                    modifier = Modifier.clickable { onToggleExpand() }
                 ) {
                     Icon(
                         imageVector = Icons.Default.Description,
@@ -1357,6 +1549,18 @@ private fun TransactionHeaderCard(
                     }
                 }
 
+                // Center: Group Switcher Row
+                if (isExpanded) {
+                    GroupSwitcherRow(
+                        selectedGroup = viewModel.selectedGroup,
+                        onGroupSelect = { newGroup -> viewModel.selectGroup(newGroup) },
+                        enabled = !isReadOnly,
+                        modifier = Modifier
+                            .weight(1f, fill = false)
+                            .padding(horizontal = 12.dp)
+                    )
+                }
+
                 // Template Selector & Controls
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -1379,14 +1583,14 @@ private fun TransactionHeaderCard(
                                     label = { Text("Dokumento šablonas") },
                                     trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = tplExpanded) },
                                     colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(),
-                                    modifier = Modifier.menuAnchor().width(280.dp),
+                                    modifier = Modifier.menuAnchor().width(260.dp),
                                     singleLine = true,
                                     enabled = !isReadOnly
                                 )
                                 ExposedDropdownMenu(
                                     expanded = tplExpanded && !isReadOnly,
                                     onDismissRequest = { tplExpanded = false },
-                                    modifier = Modifier.widthIn(min = 280.dp)
+                                    modifier = Modifier.widthIn(min = 260.dp)
                                 ) {
                                     templates.forEach { tpl ->
                                         val labelText = if (tpl.isDefault && !tpl.name.contains("Numatytas", ignoreCase = true)) {
@@ -1421,9 +1625,9 @@ private fun TransactionHeaderCard(
                             if (showExtDialog) {
                                 com.suprogramuota_visata.vedlys.ui.components.ExtTemplateDialog(
                                     apiClient = apiClient,
-                                    ownerType = "TransactionSv",
+                                    ownerType = viewModel.getOwnerTypeForGroup(viewModel.selectedGroup),
                                     onDismiss = { showExtDialog = false },
-                                    onChanged = { viewModel.loadTask() }
+                                    onChanged = { viewModel.loadTemplatesForGroup(viewModel.selectedGroup) }
                                 )
                             }
                         }
@@ -1453,7 +1657,20 @@ private fun TransactionHeaderCard(
             ) {
                 // 1. Dokumento tipas (Dropdown)
                 var docTypeExpanded by remember { mutableStateOf(false) }
-                val docTypes = remember { PredefinedDocumentTypes.filter { it != "Visi" } }
+                val docTypes = remember(viewModel.selectedGroup, transaction.documentType) {
+                    val types = when (viewModel.selectedGroup) {
+                        "Financial" -> com.suprogramuota_visata.enums.DocumentType.getByCategory(com.suprogramuota_visata.enums.DocumentCategory.FINANCIAL).map { it.id }
+                        "Operational" -> com.suprogramuota_visata.enums.DocumentCategory.OPERATIONAL.let { com.suprogramuota_visata.enums.DocumentType.getByCategory(it).map { dt -> dt.id } }
+                        "Delivery" -> com.suprogramuota_visata.enums.DocumentCategory.DELIVERY.let { com.suprogramuota_visata.enums.DocumentType.getByCategory(it).map { dt -> dt.id } }
+                        "CRM" -> com.suprogramuota_visata.enums.DocumentCategory.CRM.let { com.suprogramuota_visata.enums.DocumentType.getByCategory(it).map { dt -> dt.id } }
+                        else -> com.suprogramuota_visata.enums.DocumentType.entries.map { it.id }
+                    }
+                    if (transaction.documentType.isNotBlank() && !types.contains(transaction.documentType)) {
+                        types + transaction.documentType
+                    } else {
+                        types
+                    }
+                }
                 ExposedDropdownMenuBox(
                     expanded = docTypeExpanded,
                     onExpandedChange = { if (!isReadOnly) docTypeExpanded = !docTypeExpanded },
@@ -1618,24 +1835,23 @@ private fun TransactionHeaderCard(
                 }
             }
 
-            // Eilutė 2: Visi standartiniai šablono laukai vienoje horizontalioje eilutėje (Partneris, Iš Sandėlio, Į Sandėlį, Iš Padalinio, Į Padalinį)
+            // Eilutė 2: Visi standartiniai šablono laukai vienoje horizontalioje eilutėje (Partneris, Iš Saugyklos, Į Saugyklą, Iš Padalinio, Į Padalinį)
+            val whFromId = transaction.attributes.find { it.name == "Iš Saugyklos" || it.name == "Iš Sandėlio" }?.value?.toIntOrNull()
+            val whToId = transaction.attributes.find { it.name == "Į Saugyklą" || it.name == "Į Sandėlį" }?.value?.toIntOrNull()
             val partnerId = transaction.attributes.find { it.name == "Partneris" }?.value?.toIntOrNull()
-            val whFromId = transaction.attributes.find { it.name == "Iš Sandėlio" }?.value?.toIntOrNull()
-            val whToId = transaction.attributes.find { it.name == "Į Sandėlį" }?.value?.toIntOrNull()
             val deptFromId = transaction.attributes.find { it.name == "Iš Padalinio" }?.value?.toIntOrNull()
             val deptToId = transaction.attributes.find { it.name == "Į Padalinį" }?.value?.toIntOrNull()
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.Top
             ) {
-                // 1. Partneris (weight 1.3f)
+                // 1. Partneris (weight 1.2f)
                 val isPartnerError = validationErrors.containsKey("Partneris")
                 val isPartnerSuccess = validationSuccesses.containsKey("Partneris")
-                val partnerSupportingText = validationErrors["Partneris"]
                 val partnerColors = if (isPartnerSuccess) {
-                    OutlinedTextFieldDefaults.colors(
+                    ExposedDropdownMenuDefaults.outlinedTextFieldColors(
                         focusedBorderColor = androidx.compose.ui.graphics.Color(0xFF2E7D32),
                         unfocusedBorderColor = androidx.compose.ui.graphics.Color(0xFF2E7D32),
                         focusedLabelColor = androidx.compose.ui.graphics.Color(0xFF2E7D32),
@@ -1643,14 +1859,16 @@ private fun TransactionHeaderCard(
                     )
                 } else null
 
-                SearchablePartnerLookup(
+                SearchableTypeDropdown(
                     apiClient = apiClient,
-                    selectedPartnerId = partnerId,
-                    onSelected = { p ->
-                        if (p != null) {
-                            viewModel.updateAttribute("Partneris", "Partner", p.id.toString())
+                    typeName = "Partner",
+                    label = "Partneris",
+                    selectedTypeId = partnerId,
+                    onSelected = { t ->
+                        if (t != null) {
+                            viewModel.updateAttribute("Partneris", "Partner", t.id.toString())
                             dirtyFields["Partneris"] = true
-                            validateTransactionField("Partneris", p.id.toString())
+                            validateTransactionField("Partneris", t.id.toString())
                         } else {
                             viewModel.removeAttribute("Partneris")
                             dirtyFields["Partneris"] = true
@@ -1658,20 +1876,19 @@ private fun TransactionHeaderCard(
                         }
                     },
                     isError = isPartnerError,
-                    supportingText = partnerSupportingText,
+                    supportingText = validationErrors["Partneris"],
                     colors = partnerColors,
                     modifier = Modifier
-                        .weight(1.3f)
+                        .weight(1.2f)
                         .then(transactionValidationModifier("Partneris", focusRequesterPartner, focusRequesterWhFrom) {
                             val cur = transaction.attributes.find { it.name == "Partneris" }?.value ?: ""
                             validateTransactionField("Partneris", cur)
-                        }),
-                    enabled = !isReadOnly
+                        })
                 )
 
-                // 2. Iš Sandėlio (weight 1f)
-                val isWhFromError = validationErrors.containsKey("Iš Sandėlio")
-                val isWhFromSuccess = validationSuccesses.containsKey("Iš Sandėlio")
+                // 2. Iš Saugyklos (weight 1f)
+                val isWhFromError = validationErrors.containsKey("Iš Saugyklos") || validationErrors.containsKey("Iš Sandėlio")
+                val isWhFromSuccess = validationSuccesses.containsKey("Iš Saugyklos") || validationSuccesses.containsKey("Iš Sandėlio")
                 val whFromColors = if (isWhFromSuccess) {
                     ExposedDropdownMenuDefaults.outlinedTextFieldColors(
                         focusedBorderColor = androidx.compose.ui.graphics.Color(0xFF2E7D32),
@@ -1683,34 +1900,35 @@ private fun TransactionHeaderCard(
 
                 SearchableTypeDropdown(
                     apiClient = apiClient,
-                    typeName = "Warehouse",
-                    label = "Iš Sandėlio",
+                    typeName = "Storage",
+                    label = "Iš Saugyklos",
                     selectedTypeId = whFromId,
                     onSelected = { t ->
                         if (t != null) {
-                            viewModel.updateAttribute("Iš Sandėlio", "Warehouse", t.id.toString())
-                            dirtyFields["Iš Sandėlio"] = true
-                            validateTransactionField("Iš Sandėlio", t.id.toString())
+                            viewModel.updateAttribute("Iš Saugyklos", "Storage", t.id.toString())
+                            dirtyFields["Iš Saugyklos"] = true
+                            validateTransactionField("Iš Saugyklos", t.id.toString())
                         } else {
+                            viewModel.removeAttribute("Iš Saugyklos")
                             viewModel.removeAttribute("Iš Sandėlio")
-                            dirtyFields["Iš Sandėlio"] = true
-                            validateTransactionField("Iš Sandėlio", "")
+                            dirtyFields["Iš Saugyklos"] = true
+                            validateTransactionField("Iš Saugyklos", "")
                         }
                     },
                     isError = isWhFromError,
-                    supportingText = validationErrors["Iš Sandėlio"],
+                    supportingText = validationErrors["Iš Saugyklos"] ?: validationErrors["Iš Sandėlio"],
                     colors = whFromColors,
                     modifier = Modifier
                         .weight(1f)
-                        .then(transactionValidationModifier("Iš Sandėlio", focusRequesterWhFrom, focusRequesterWhTo) {
-                            val cur = transaction.attributes.find { it.name == "Iš Sandėlio" }?.value ?: ""
-                            validateTransactionField("Iš Sandėlio", cur)
+                        .then(transactionValidationModifier("Iš Saugyklos", focusRequesterWhFrom, focusRequesterWhTo) {
+                            val cur = transaction.attributes.find { it.name == "Iš Saugyklos" || it.name == "Iš Sandėlio" }?.value ?: ""
+                            validateTransactionField("Iš Saugyklos", cur)
                         })
                 )
 
-                // 3. Į Sandėlį (weight 1f)
-                val isWhToError = validationErrors.containsKey("Į Sandėlį")
-                val isWhToSuccess = validationSuccesses.containsKey("Į Sandėlį")
+                // 3. Į Saugyklą (weight 1f)
+                val isWhToError = validationErrors.containsKey("Į Saugyklą") || validationErrors.containsKey("Į Sandėlį")
+                val isWhToSuccess = validationSuccesses.containsKey("Į Saugyklą") || validationSuccesses.containsKey("Į Sandėlį")
                 val whToColors = if (isWhToSuccess) {
                     ExposedDropdownMenuDefaults.outlinedTextFieldColors(
                         focusedBorderColor = androidx.compose.ui.graphics.Color(0xFF2E7D32),
@@ -1722,28 +1940,29 @@ private fun TransactionHeaderCard(
 
                 SearchableTypeDropdown(
                     apiClient = apiClient,
-                    typeName = "Warehouse",
-                    label = "Į Sandėlį",
+                    typeName = "Storage",
+                    label = "Į Saugyklą",
                     selectedTypeId = whToId,
                     onSelected = { t ->
                         if (t != null) {
-                            viewModel.updateAttribute("Į Sandėlį", "Warehouse", t.id.toString())
-                            dirtyFields["Į Sandėlį"] = true
-                            validateTransactionField("Į Sandėlį", t.id.toString())
+                            viewModel.updateAttribute("Į Saugyklą", "Storage", t.id.toString())
+                            dirtyFields["Į Saugyklą"] = true
+                            validateTransactionField("Į Saugyklą", t.id.toString())
                         } else {
+                            viewModel.removeAttribute("Į Saugyklą")
                             viewModel.removeAttribute("Į Sandėlį")
-                            dirtyFields["Į Sandėlį"] = true
-                            validateTransactionField("Į Sandėlį", "")
+                            dirtyFields["Į Saugyklą"] = true
+                            validateTransactionField("Į Saugyklą", "")
                         }
                     },
                     isError = isWhToError,
-                    supportingText = validationErrors["Į Sandėlį"],
+                    supportingText = validationErrors["Į Saugyklą"] ?: validationErrors["Į Sandėlį"],
                     colors = whToColors,
                     modifier = Modifier
                         .weight(1f)
-                        .then(transactionValidationModifier("Į Sandėlį", focusRequesterWhTo, focusRequesterDeptFrom) {
-                            val cur = transaction.attributes.find { it.name == "Į Sandėlį" }?.value ?: ""
-                            validateTransactionField("Į Sandėlį", cur)
+                        .then(transactionValidationModifier("Į Saugyklą", focusRequesterWhTo, focusRequesterDeptFrom) {
+                            val cur = transaction.attributes.find { it.name == "Į Saugyklą" || it.name == "Į Sandėlį" }?.value ?: ""
+                            validateTransactionField("Į Saugyklą", cur)
                         })
                 )
 
@@ -1979,7 +2198,7 @@ private fun TransactionDetailRow(
                 ).joinToString(" | ")
                 Text(text = meta, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 val extraMeta = listOfNotNull(
-                    detail.attributes.find { it.name == "Sandėlis" }?.value?.takeIf { it.isNotBlank() }?.let { "Sandėlis: $it" },
+                    detail.attributes.find { it.name == "Saugykla" || it.name == "Sandėlis" }?.value?.takeIf { it.isNotBlank() }?.let { "Saugykla: $it" },
                     detail.attributes.find { it.name == "Padalinys" }?.value?.takeIf { it.isNotBlank() }?.let { "Padalinys: $it" }
                 ).joinToString(" | ")
                 if (extraMeta.isNotEmpty()) {
@@ -2189,7 +2408,7 @@ private fun TransactionDetailDialog(
     }
     var matasStr by remember {
         mutableStateOf(
-            initialDetail?.attributes?.find { it.name == "Matas" }?.value ?: "vnt."
+            initialDetail?.attributes?.find { it.name == "Matas" }?.value ?: "pcs"
         )
     }
     
@@ -2197,7 +2416,7 @@ private fun TransactionDetailDialog(
     
     var selectedWarehouseName by remember {
         mutableStateOf(
-            initialDetail?.attributes?.find { it.name == "Sandėlis" }?.value ?: ""
+            initialDetail?.attributes?.find { it.name == "Saugykla" || it.name == "Sandėlis" }?.value ?: ""
         )
     }
     var selectedDivisionName by remember {
@@ -2284,7 +2503,7 @@ private fun TransactionDetailDialog(
     LaunchedEffect(initialDetail) {
         if (initialDetail != null) {
             initialDetail.attributes.forEach { attr ->
-                if (attr.name !in setOf("Matas", "Sandėlis", "Padalinys")) {
+                if (attr.name !in setOf("Matas", "Saugykla", "Sandėlis", "Padalinys")) {
                     customAttributeValues[attr.name] = attr.value
                 }
             }
@@ -2295,7 +2514,7 @@ private fun TransactionDetailDialog(
         val template = activeTemplate
         if (template != null) {
             template.attributes.forEach { attr ->
-                if (attr.name !in setOf("Matas", "Sandėlis", "Padalinys") && !customAttributeValues.containsKey(attr.name)) {
+                if (attr.name !in setOf("Matas", "Saugykla", "Sandėlis", "Padalinys") && !customAttributeValues.containsKey(attr.name)) {
                     customAttributeValues[attr.name] = attr.defaultValue ?: ""
                 }
             }
@@ -2437,9 +2656,14 @@ private fun TransactionDetailDialog(
     var unitsList by remember { mutableStateOf<List<TypeDTO>>(emptyList()) }
     
     LaunchedEffect(Unit) {
-        when (val res = apiClient.typeRepository.getAllByType("Warehouse")) {
+        when (val res = apiClient.typeRepository.getAllByType("StorageSv")) {
             is ApiResult.Success -> warehousesList = res.data ?: emptyList()
-            is ApiResult.Error -> {}
+            is ApiResult.Error -> {
+                when (val fbRes = apiClient.typeRepository.getAllByType("Warehouse")) {
+                    is ApiResult.Success -> warehousesList = fbRes.data ?: emptyList()
+                    is ApiResult.Error -> {}
+                }
+            }
         }
         when (val res = apiClient.typeRepository.getAllByType("Division")) {
             is ApiResult.Success -> divisionsList = res.data ?: emptyList()
@@ -2681,18 +2905,39 @@ private fun TransactionDetailDialog(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
+                        val isDialogPcs = remember(matasStr, unitsList) { isUnitPcsBased(matasStr, unitsList) }
                         SelectAllOutlinedTextField(
                             value = quantityStr,
-                            onValueChange = { 
-                                if (detailGroup == "Financial") {
-                                    onQtyChanged(it)
+                            onValueChange = { input ->
+                                val filtered = if (isDialogPcs) {
+                                    input.filter { it.isDigit() }
                                 } else {
-                                    quantityStr = it
+                                    val maxDec = getUnitMaxDecimals(matasStr, unitsList)
+                                    val normalized = input.replace(',', '.')
+                                    val dotCount = normalized.count { it == '.' }
+                                    if (dotCount <= 1 && normalized.all { it.isDigit() || it == '.' }) {
+                                        val parts = normalized.split('.')
+                                        if (parts.size > 1 && parts[1].length > maxDec) {
+                                            "${parts[0]}.${parts[1].take(maxDec)}"
+                                        } else {
+                                            normalized
+                                        }
+                                    } else {
+                                        quantityStr
+                                    }
+                                }
+                                if (detailGroup == "Financial") {
+                                    onQtyChanged(filtered)
+                                } else {
+                                    quantityStr = filtered
                                 }
                             },
                             label = { Text("Kiekis") },
                             modifier = Modifier.weight(1f),
-                            singleLine = true
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(
+                                keyboardType = if (isDialogPcs) KeyboardType.Number else KeyboardType.Decimal
+                            )
                         )
                         var dialogMatasExpanded by remember { mutableStateOf(false) }
                         ExposedDropdownMenuBox(
@@ -2702,10 +2947,8 @@ private fun TransactionDetailDialog(
                         ) {
                             OutlinedTextField(
                                 value = matasStr,
-                                onValueChange = { 
-                                    matasStr = it 
-                                    dialogMatasExpanded = true
-                                },
+                                onValueChange = {},
+                                readOnly = true,
                                 label = { Text("Matas") },
                                 trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = dialogMatasExpanded) },
                                 modifier = Modifier.menuAnchor().fillMaxWidth(),
@@ -2715,19 +2958,23 @@ private fun TransactionDetailDialog(
                                 expanded = dialogMatasExpanded,
                                 onDismissRequest = { dialogMatasExpanded = false }
                             ) {
-                                val availableUnits = remember(unitsList) {
+                                val availableUnits = remember(unitsList, language) {
                                     if (unitsList.isNotEmpty()) {
                                         unitsList.map { u ->
-                                            val shortCode = getTranslatedUnitName(u.code ?: "", u.name, language)
-                                            val displayLabel = if (u.name.isNotBlank() && !u.name.equals(shortCode, ignoreCase = true)) {
-                                                "$shortCode (${u.name})"
+                                            val uCode = getUnitCode(u.code, u.name)
+                                            val transName = getTranslatedUnitName(u.code ?: "", u.name, language)
+                                            val displayLabel = if (transName.isNotBlank() && !transName.equals(uCode, ignoreCase = true)) {
+                                                "$uCode ($transName)"
                                             } else {
-                                                shortCode
+                                                uCode
                                             }
-                                            shortCode to displayLabel
+                                            uCode to displayLabel
                                         }
                                     } else {
-                                        listOf("vnt.", "kg", "l", "m", "kompl.", "val.", "d.").map { it to it }
+                                        listOf("pcs", "kg", "m", "m2", "m3", "ltr").map { code ->
+                                            val trans = getTranslatedUnitName(code, code, language)
+                                            code to "$code ($trans)"
+                                        }
                                     }
                                 }
                                 availableUnits.forEach { (shortCode, displayLabel) ->
@@ -2736,6 +2983,14 @@ private fun TransactionDetailDialog(
                                         onClick = {
                                             matasStr = shortCode
                                             dialogMatasExpanded = false
+                                            if (isUnitPcsBased(shortCode, unitsList)) {
+                                                val intVal = quantityStr.toDoubleOrNull()?.toInt()?.toString() ?: "1"
+                                                if (detailGroup == "Financial") {
+                                                    onQtyChanged(intVal)
+                                                } else {
+                                                    quantityStr = intVal
+                                                }
+                                            }
                                         }
                                     )
                                 }
@@ -2758,7 +3013,7 @@ private fun TransactionDetailDialog(
                             value = selectedWarehouseName,
                             onValueChange = {},
                             readOnly = true,
-                            label = { Text("Sandėlis") },
+                            label = { Text("Saugykla") },
                             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = whExpanded) },
                             colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(),
                             modifier = Modifier.menuAnchor().fillMaxWidth(),
@@ -2932,7 +3187,7 @@ private fun TransactionDetailDialog(
                 }
 
                 // Dinamiškai atvaizduojame papildomus šablono atributus
-                val customAttrsList = activeTemplate?.attributes?.filter { it.name !in setOf("Matas", "Sandėlis", "Padalinys") } ?: emptyList()
+                val customAttrsList = activeTemplate?.attributes?.filter { it.name !in setOf("Matas", "Saugykla", "Sandėlis", "Padalinys") } ?: emptyList()
                 if (customAttrsList.isNotEmpty()) {
                     Spacer(modifier = Modifier.height(8.dp))
                     Text("Papildomi atributai", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
@@ -2987,12 +3242,12 @@ private fun TransactionDetailDialog(
                         currentAttrs.add(AttributeDTO(name = "Matas", attributeType = "STRING", value = matasStr))
                     }
                     
-                    // Sandėlis
-                    val whIndex = currentAttrs.indexOfFirst { it.name == "Sandėlis" }
+                    // Saugykla
+                    val whIndex = currentAttrs.indexOfFirst { it.name == "Saugykla" || it.name == "Sandėlis" }
                     if (whIndex >= 0) {
-                        currentAttrs[whIndex] = currentAttrs[whIndex].copy(value = selectedWarehouseName)
+                        currentAttrs[whIndex] = currentAttrs[whIndex].copy(name = "Saugykla", attributeType = "StorageSv", value = selectedWarehouseName)
                     } else {
-                        currentAttrs.add(AttributeDTO(name = "Sandėlis", attributeType = "WarehouseSv", value = selectedWarehouseName))
+                        currentAttrs.add(AttributeDTO(name = "Saugykla", attributeType = "StorageSv", value = selectedWarehouseName))
                     }
                     
                     // Padalinys
@@ -3004,7 +3259,7 @@ private fun TransactionDetailDialog(
                     }
 
                     // Dinaminiai šablono atributai
-                    val standardNames = setOf("Matas", "Sandėlis", "Padalinys")
+                    val standardNames = setOf("Matas", "Saugykla", "Sandėlis", "Padalinys")
                     currentAttrs.removeAll { it.name !in standardNames }
                     customAttributeValues.forEach { (name, value) ->
                         val attrType = activeTemplate?.attributes?.find { it.name == name }?.attributeType ?: "STRING"

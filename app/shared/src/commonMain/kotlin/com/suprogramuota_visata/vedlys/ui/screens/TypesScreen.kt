@@ -66,15 +66,38 @@ import com.suprogramuota_visata.vedlys.AppSettings
 import com.suprogramuota_visata.vedlys.utils.validateTypeConcept
 import com.suprogramuota_visata.vedlys.utils.validateFieldValue
 import com.suprogramuota_visata.vedlys.ui.components.PredefinedStandardFields
+import com.suprogramuota_visata.enums.LocationType
 
 val PredefinedTypeGroups = listOf(
-    "ProductSv", "PartnerSv", "ServiceSv", "DivisionSv", "WarehouseSv", "LocationSv", "AddressSv", 
+    "ProductSv", "PartnerSv", "ServiceSv", "DivisionSv", "StorageSv", "WarehouseSv", "LocationSv", "AddressSv", 
     "BankSv", "TransactionSv", 
+    "FinancialTransactionSv", "OperationalTransactionSv", "DeliveryTransactionSv", "CrmTransactionSv",
     "FinancialTransactionDetailSv", "OperationalTransactionDetailSv", "DeliveryTransactionDetailSv", "CrmTransactionDetailSv",
     "GroupSv", "UnitSv",
     "SettingsSv", "OwnerSv", "UserSv"
 )
 val PredefinedAttributeTypes = listOf("INTEGER", "LONG", "DECIMAL", "DATE", "DATE_TIME", "TIMESTAMP", "STRING", "BOOL", "STRING_LIST", "URL_LIST", "JSON_STRING", "XML_STRING", "EMAIL_LIST", "Local_Type")
+
+fun isProtectedSystemItem(item: TypeDTO, currentTypeName: String = item.type): Boolean {
+    if (item.id == 0) return true
+    if (item.level == 0) return true
+    if (item.isChild == false) return true
+    if (item.parentGroupId == null && (item.type == "GroupSv" || currentTypeName == "GroupSv")) return true
+
+    val isUnit = item.type in setOf("UnitSv", "Unit", "Matas", "Matavimo vienetas") || 
+                 currentTypeName in setOf("UnitSv", "Unit", "Matas", "Matavimo vienetas")
+    if (isUnit) {
+        val code = item.code?.trim()?.lowercase() ?: ""
+        val name = item.name.trim().lowercase()
+        val protectedCodes = setOf("pcs", "kg", "m", "m2", "m3", "ltr", "l", "vnt", "vnt.")
+        val protectedNames = setOf(
+            "vienetas", "metras", "kilogramas", "kvadratinis metras", "kūbinis metras", "kubinis metras", "litras",
+            "piece", "meter", "kilogram", "square meter", "cubic meter", "liter", "litre"
+        )
+        if (code in protectedCodes || name in protectedNames) return true
+    }
+    return false
+}
 
 fun getTypesString(key: String, language: AppLanguage): String {
     return com.suprogramuota_visata.vedlys.utils.Localization.getString("types", key, language)
@@ -87,11 +110,16 @@ fun String.toFriendlyTypeName(language: AppLanguage = AppLanguage.LT): String {
             "PartnerSv", "Partner" -> "Partner"
             "ServiceSv", "Service" -> "Service"
             "DivisionSv", "Division" -> "Division"
-            "WarehouseSv", "Warehouse" -> "Warehouse"
+            "StorageSv", "Storage" -> "Storage"
+            "WarehouseSv", "Warehouse" -> "Storage"
             "LocationSv", "Location" -> "Location"
             "AddressSv", "Address" -> "Address Details"
             "BankSv", "Bank" -> "Bank Details"
             "TransactionSv", "Transaction" -> "Transaction"
+            "FinancialTransactionSv", "Financial Transaction" -> "Financial Transaction"
+            "OperationalTransactionSv", "Operational Transaction" -> "Operational Transaction"
+            "DeliveryTransactionSv", "Delivery Transaction" -> "Delivery Transaction"
+            "CrmTransactionSv", "CRM Transaction" -> "CRM Transaction"
             "TransactionDetailSv" -> "Transaction Detail"
             "FinancialTransactionDetailSv", "Financial Transaction Detail" -> "Financial Transaction Detail"
             "OperationalTransactionDetailSv", "Operational Transaction Detail" -> "Operational Transaction Detail"
@@ -114,11 +142,16 @@ fun String.toFriendlyTypeName(language: AppLanguage = AppLanguage.LT): String {
         "PartnerSv", "Partner" -> "Partneris"
         "ServiceSv", "Service" -> "Paslauga"
         "DivisionSv", "Division" -> "Padalinys"
-        "WarehouseSv", "Warehouse" -> "Sandėlis"
+        "StorageSv", "Storage" -> "Saugykla"
+        "WarehouseSv", "Warehouse" -> "Saugykla"
         "LocationSv", "Location" -> "Lokacija"
         "AddressSv", "Address" -> "Adreso rekvizitai"
         "BankSv", "Bank" -> "Banko rekvizitai"
         "TransactionSv", "Transaction" -> "Dokumentas"
+        "FinancialTransactionSv", "Financial Transaction" -> "Finansinis dokumentas"
+        "OperationalTransactionSv", "Operational Transaction" -> "Ūkinis dokumentas"
+        "DeliveryTransactionSv", "Delivery Transaction" -> "Gabenimo dokumentas"
+        "CrmTransactionSv", "CRM Transaction" -> "CRM dokumentas"
         "TransactionDetailSv" -> "Dokumento eilutė"
         "FinancialTransactionDetailSv", "Financial Transaction Detail" -> "Finansinio dokumento eilutė"
         "OperationalTransactionDetailSv", "Operational Transaction Detail" -> "Ūkinio dokumento eilutė"
@@ -143,6 +176,10 @@ fun String.formatGroupName(language: AppLanguage = AppLanguage.LT): String {
         "ProductSv", "Product", "PartnerSv", "Partner", "ServiceSv", "Service", "DivisionSv", "Division",
         "WarehouseSv", "Warehouse", "LocationSv", "Location", "AddressSv", "Address", "BankSv", "Bank",
         "TransactionSv", "Transaction", "TransactionDetailSv",
+        "FinancialTransactionSv", "Financial Transaction",
+        "OperationalTransactionSv", "Operational Transaction",
+        "DeliveryTransactionSv", "Delivery Transaction",
+        "CrmTransactionSv", "CRM Transaction",
         "FinancialTransactionDetailSv", "Financial Transaction Detail",
         "OperationalTransactionDetailSv", "Operational Transaction Detail",
         "DeliveryTransactionDetailSv", "Delivery Transaction Detail",
@@ -1141,6 +1178,7 @@ fun TypesScreen(
 
                             TypeRow(
                                 item = item,
+                                currentTypeName = viewModel.typeName,
                                 depth = depth,
                                 path = displayNode.path,
                                 language = language,
@@ -1170,7 +1208,11 @@ fun TypesScreen(
                                         showEditor = true
                                     }
                                 } else null,
-                                onDelete = { deleteCandidate = item },
+                                onDelete = { 
+                                    if (!isProtectedSystemItem(item, viewModel.typeName)) {
+                                        deleteCandidate = item 
+                                    }
+                                },
                                 onViewImage = if (imgUuid != null) {
                                     { previewImageUuid = imgUuid }
                                 } else {
@@ -1239,20 +1281,24 @@ fun TypesScreen(
         }
 
         deleteCandidate?.let { item ->
-            AlertDialog(
-                onDismissRequest = { deleteCandidate = null },
-                title = { Text(getTypesString("confirm_deletion_title", language)) },
-                text = { Text("${getTypesString("confirm_deletion_text", language)} „${item.name}\"?") },
-                confirmButton = {
-                    TextButton(onClick = {
-                        viewModel.delete(item)
-                        deleteCandidate = null
-                    }) { Text(getTypesString("delete", language)) }
-                },
-                dismissButton = {
-                    TextButton(onClick = { deleteCandidate = null }) { Text(getTypesString("cancel", language)) }
-                }
-            )
+            if (isProtectedSystemItem(item, viewModel.typeName)) {
+                deleteCandidate = null
+            } else {
+                AlertDialog(
+                    onDismissRequest = { deleteCandidate = null },
+                    title = { Text(getTypesString("confirm_deletion_title", language)) },
+                    text = { Text("${getTypesString("confirm_deletion_text", language)} „${item.name}\"?") },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            viewModel.delete(item)
+                            deleteCandidate = null
+                        }) { Text(getTypesString("delete", language)) }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { deleteCandidate = null }) { Text(getTypesString("cancel", language)) }
+                    }
+                )
+            }
         }
 
         if (previewImageUuid != null) {
@@ -1268,6 +1314,7 @@ fun TypesScreen(
 @Composable
 private fun TypeRow(
     item: TypeDTO,
+    currentTypeName: String = item.type,
     depth: Int = 0,
     path: String = "",
     language: AppLanguage,
@@ -1282,6 +1329,8 @@ private fun TypeRow(
     onDelete: () -> Unit,
     onViewImage: (() -> Unit)? = null
 ) {
+    val isProtected = isProtectedSystemItem(item, currentTypeName)
+
     ElevatedCard(
         modifier = Modifier
             .fillMaxWidth()
@@ -1293,12 +1342,14 @@ private fun TypeRow(
                 .padding(horizontal = 16.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            if (onToggleSelect != null && item.id != null) {
+            if (onToggleSelect != null && item.id != null && !isProtected) {
                 Checkbox(
                     checked = isSelected,
                     onCheckedChange = { onToggleSelect() }
                 )
                 Spacer(Modifier.width(6.dp))
+            } else if (onToggleSelect != null) {
+                Spacer(Modifier.width(28.dp))
             }
 
             if (item.type == "GroupSv") {
@@ -1424,6 +1475,17 @@ private fun TypeRow(
                         }
                         item.code?.let { append("  •  Kodas: $it") }
                         item.barcode?.let { append("  •  Barkodas: $it") }
+                        if (!item.locationType.isNullOrBlank()) {
+                            val ltObj = LocationType.fromName(item.locationType ?: "")
+                            val ltName = if (language == AppLanguage.EN) (ltObj?.enName ?: item.locationType) else (ltObj?.ltName ?: item.locationType)
+                            append("  •  Tipas: $ltName")
+                        }
+                        if (item.locations != null && item.locations!!.isNotEmpty()) {
+                            append("  •  Lokacijos: ${item.locations!!.size}")
+                        }
+                        if (item.products != null && item.products!!.isNotEmpty()) {
+                            append("  •  Prekės: ${item.products!!.size}")
+                        }
                         if (item.attributes.isNotEmpty()) {
                             val attrsStr = item.attributes.joinToString(", ") { "${it.name}: ${it.value ?: "—"}" }
                             append("  •  ${getTypesString("attributes", language)}: $attrsStr")
@@ -1439,7 +1501,7 @@ private fun TypeRow(
 
             Spacer(Modifier.width(12.dp))
 
-            val isProtectedSystemItem = (item.id == 0) || (item.level == 0) || (item.isChild == false) || (item.parentGroupId == null && item.type == "GroupSv")
+            val isProtectedSystemItem = isProtected
             
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -1474,7 +1536,7 @@ private fun TypeRow(
                 IconButton(onClick = onEdit, modifier = Modifier.size(36.dp)) {
                     Icon(Icons.Default.Edit, contentDescription = getTypesString("edit", language), modifier = Modifier.size(20.dp))
                 }
-                if (!isProtectedSystemItem) {
+                if (!isProtected) {
                     IconButton(onClick = onDelete, modifier = Modifier.size(36.dp)) {
                         Icon(
                             Icons.Default.Delete,
@@ -1670,7 +1732,7 @@ internal fun TypeEditorDialog(
     
     var baseUnit by remember { mutableStateOf(initial?.baseUnit ?: "") }
     var baseUnitId by remember { mutableStateOf<Int?>(initial?.baseUnitId) }
-    var conversionFactor by remember { mutableStateOf(initial?.conversionFactor?.toString() ?: "1.0") }
+    var conversionFactor by remember { mutableStateOf(initial?.conversionFactor?.toString() ?: "1") }
 
     var allUnits by remember { mutableStateOf<List<TypeDTO>>(emptyList()) }
     var nestedTypeToCreate by remember { mutableStateOf<String?>(null) }
@@ -1697,10 +1759,28 @@ internal fun TypeEditorDialog(
             return true
         }
     }
+    val selectedLocationIds = remember(initial) { mutableStateListOf<Int>().apply { addAll(initial?.locations ?: emptyList()) } }
+    var allLocationsCatalog by remember { mutableStateOf<List<TypeDTO>>(emptyList()) }
+    var showAddLocationDialog by remember { mutableStateOf(false) }
+
+    val selectedProductIds = remember(initial) { mutableStateListOf<Int>().apply { addAll(initial?.products ?: emptyList()) } }
+    var allProductsCatalog by remember { mutableStateOf<List<TypeDTO>>(emptyList()) }
+    var showAddProductDialog by remember { mutableStateOf(false) }
+
+    var selectedLocationType by remember(initial) { mutableStateOf<String?>(initial?.locationType) }
+
     LaunchedEffect(Unit) {
         val res = apiClient.typeRepository.getAllByType("UnitSv")
         if (res is com.suprogramuota_visata.api.domain.util.ApiResult.Success) {
             allUnits = res.data ?: emptyList()
+        }
+        val resLocs = apiClient.typeRepository.getAllByType("LocationSv")
+        if (resLocs is com.suprogramuota_visata.api.domain.util.ApiResult.Success) {
+            allLocationsCatalog = resLocs.data ?: emptyList()
+        }
+        val resProds = apiClient.typeRepository.getAllByType("ProductSv")
+        if (resProds is com.suprogramuota_visata.api.domain.util.ApiResult.Success) {
+            allProductsCatalog = resProds.data ?: emptyList()
         }
     }
 
@@ -1826,6 +1906,17 @@ internal fun TypeEditorDialog(
             selectedTemplateId = null
         }
         loadTemplates(typeStr)
+        if (typeStr == "StorageSv" || typeStr == "WarehouseSv") {
+            val res = apiClient.typeRepository.getAllByType("LocationSv")
+            if (res is com.suprogramuota_visata.api.domain.util.ApiResult.Success) {
+                allLocationsCatalog = res.data ?: emptyList()
+            }
+        } else if (typeStr == "LocationSv") {
+            val res = apiClient.typeRepository.getAllByType("ProductSv")
+            if (res is com.suprogramuota_visata.api.domain.util.ApiResult.Success) {
+                allProductsCatalog = res.data ?: emptyList()
+            }
+        }
     }
 
     LaunchedEffect(selectedTemplateId, templates) {
@@ -1852,7 +1943,7 @@ internal fun TypeEditorDialog(
                             "Kodas" -> if (code.isEmpty()) code = valToUse
                             "Brūkšninis kodas" -> if (barcode.isEmpty()) barcode = valToUse
                             "Matavimo vienetas" -> if (baseUnit.isEmpty()) baseUnit = valToUse
-                            "Konvertavimo koeficientas" -> if (conversionFactor.isEmpty() || conversionFactor == "1.0") conversionFactor = valToUse.ifEmpty { "1.0" }
+                            "Konvertavimo koeficientas" -> if (conversionFactor.isEmpty() || conversionFactor == "1.0" || conversionFactor == "1") conversionFactor = valToUse.ifEmpty { "1" }
                         }
                     }
                 } else {
@@ -2594,11 +2685,24 @@ internal fun TypeEditorDialog(
 
                     if (typeStr == "UnitSv") {
                         var baseUnitIdDropdownExpanded by remember { mutableStateOf(false) }
+                        val noneLabel = if (language == AppLanguage.EN) "None" else "Nėra"
                         val selectedBaseUnitObj = allUnits.find { it.id == baseUnitId }
                         val selectedBaseUnitLabel = if (selectedBaseUnitObj != null) {
-                            getTranslatedUnitName(selectedBaseUnitObj.code ?: "", selectedBaseUnitObj.name, language)
+                            val uCode = selectedBaseUnitObj.code?.trim()?.takeIf { it.isNotEmpty() }
+                            val uName = selectedBaseUnitObj.name.trim()
+                            if (uCode != null) "$uCode ($uName)" else uName
                         } else {
-                            "Nėra (Bazinis vienetas)"
+                            noneLabel
+                        }
+
+                        val sortedUnits = remember(allUnits, initial) {
+                            val standardOrder = listOf("pcs", "kg", "m", "m2", "m3", "ltr")
+                            allUnits.filter { it.id != initial?.id }.sortedWith(
+                                compareBy<TypeDTO> { u ->
+                                    val idx = standardOrder.indexOf(u.code?.trim()?.lowercase())
+                                    if (idx >= 0) idx else 999
+                                }.thenBy { it.name }
+                            )
                         }
                         
                         ExposedDropdownMenuBox(
@@ -2621,19 +2725,33 @@ internal fun TypeEditorDialog(
                                 onDismissRequest = { baseUnitIdDropdownExpanded = false }
                             ) {
                                 DropdownMenuItem(
-                                    text = { Text("Nėra (Bazinis vienetas)") },
+                                    text = { Text(noneLabel) },
                                     onClick = {
                                         baseUnitId = null
+                                        conversionFactor = "1"
                                         baseUnitIdDropdownExpanded = false
+                                        validationErrors.remove("Konvertavimo koeficientas")
+                                        validationSuccesses["Konvertavimo koeficientas"] = true
                                     }
                                 )
-                                allUnits.filter { it.baseUnitId == null && it.id != initial?.id }.forEach { u ->
-                                    val label = getTranslatedUnitName(u.code ?: "", u.name, language)
+                                sortedUnits.forEach { u ->
+                                    val uCode = u.code?.trim()?.takeIf { it.isNotEmpty() }
+                                    val uName = u.name.trim()
+                                    val label = if (uCode != null) "$uCode ($uName)" else uName
                                     DropdownMenuItem(
                                         text = { Text(label) },
                                         onClick = {
                                             baseUnitId = u.id
                                             baseUnitIdDropdownExpanded = false
+                                            val currentFactor = conversionFactor.toIntOrNull() ?: 1
+                                            val parentFactor: Int = u.conversionFactor ?: 1
+                                            if (currentFactor % parentFactor != 0) {
+                                                validationErrors["Konvertavimo koeficientas"] = "Koeficientas $currentFactor negali būti priskirtas bazei '${u.name}' ($parentFactor), nes lieka liekana ${currentFactor % parentFactor}."
+                                                validationSuccesses.remove("Konvertavimo koeficientas")
+                                            } else {
+                                                validationErrors.remove("Konvertavimo koeficientas")
+                                                validationSuccesses["Konvertavimo koeficientas"] = true
+                                            }
                                         }
                                     )
                                 }
@@ -2644,17 +2762,31 @@ internal fun TypeEditorDialog(
                         val isConversionSuccess = validationSuccesses.containsKey("Konvertavimo koeficientas") && !isConversionError
                         OutlinedTextField(
                             value = conversionFactor,
-                            onValueChange = {
-                                conversionFactor = it
+                            onValueChange = { input ->
+                                val digitsOnly = input.filter { it.isDigit() }
+                                conversionFactor = digitsOnly
                                 dirtyFields["Konvertavimo koeficientas"] = true
                                 val idx = attributes.indexOfFirst { it.name == "Konvertavimo koeficientas" }
                                 if (idx >= 0) {
-                                    attributes[idx] = attributes[idx].copy(value = it)
+                                    attributes[idx] = attributes[idx].copy(value = digitsOnly)
                                 }
-                                if (validationErrors.containsKey("Konvertavimo koeficientas")) {
-                                    validateStandardField("Konvertavimo koeficientas", it)
-                                } else {
+                                val factorVal = digitsOnly.toIntOrNull() ?: 0
+                                if (factorVal < 1) {
+                                    validationErrors["Konvertavimo koeficientas"] = "Koeficientas privalo būti >= 1"
                                     validationSuccesses.remove("Konvertavimo koeficientas")
+                                } else if (baseUnitId != null) {
+                                    val parentObj = allUnits.find { it.id == baseUnitId }
+                                    val pFactor: Int = parentObj?.conversionFactor ?: 1
+                                    if (factorVal % pFactor != 0) {
+                                        validationErrors["Konvertavimo koeficientas"] = "Koeficientas $factorVal negali būti priskirtas bazei '${parentObj?.name}' ($pFactor), nes lieka liekana ${factorVal % pFactor}."
+                                        validationSuccesses.remove("Konvertavimo koeficientas")
+                                    } else {
+                                        validationErrors.remove("Konvertavimo koeficientas")
+                                        validationSuccesses["Konvertavimo koeficientas"] = true
+                                    }
+                                } else {
+                                    validationErrors.remove("Konvertavimo koeficientas")
+                                    validationSuccesses["Konvertavimo koeficientas"] = true
                                 }
                             },
                             label = { Text("Konv. koeficientas") },
@@ -2703,6 +2835,212 @@ internal fun TypeEditorDialog(
                         Switch(checked = enabled, onCheckedChange = { enabled = it })
                         Spacer(Modifier.width(6.dp))
                         Text(getTypesString("enabled", language), style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+            }
+
+            // StorageSv / WarehouseSv Locations Management Section
+            if (typeStr == "StorageSv" || typeStr == "WarehouseSv") {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = if (language == AppLanguage.EN) "Assigned Locations (${selectedLocationIds.size})" else "Priskirtos lokacijos (${selectedLocationIds.size})",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Button(
+                                onClick = { showAddLocationDialog = true },
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                            ) {
+                                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text(if (language == AppLanguage.EN) "Add Location" else "Pridėti lokaciją")
+                            }
+                        }
+
+                        if (selectedLocationIds.isEmpty()) {
+                            Text(
+                                text = if (language == AppLanguage.EN) "No locations assigned to this storage yet." else "Šiai saugyklai dar nepriskirta jokių lokacijų.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        } else {
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                selectedLocationIds.forEach { locId ->
+                                    val loc = allLocationsCatalog.find { it.id == locId }
+                                    Surface(
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = MaterialTheme.colorScheme.background,
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(
+                                                    text = loc?.name ?: "Lokacija #$locId",
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    fontWeight = FontWeight.SemiBold
+                                                )
+                                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                    Text("ID: $locId", style = MaterialTheme.typography.labelSmall)
+                                                    if (!loc?.code.isNullOrBlank()) Text("Kodas: ${loc?.code}", style = MaterialTheme.typography.labelSmall)
+                                                    if (!loc?.barcode.isNullOrBlank()) Text("BC: ${loc?.barcode}", style = MaterialTheme.typography.labelSmall)
+                                                    if (!loc?.locationType.isNullOrBlank()) {
+                                                        val ltObj = LocationType.fromName(loc?.locationType ?: "")
+                                                        val ltName = if (language == AppLanguage.EN) (ltObj?.enName ?: loc?.locationType) else (ltObj?.ltName ?: loc?.locationType)
+                                                        Text("[$ltName]", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                                                    }
+                                                }
+                                            }
+                                            IconButton(
+                                                onClick = { selectedLocationIds.remove(locId) },
+                                                modifier = Modifier.size(32.dp)
+                                            ) {
+                                                Icon(Icons.Default.Delete, contentDescription = "Pašalinti", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp))
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // LocationSv Properties and Products Management Section
+            if (typeStr == "LocationSv") {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Text(
+                            text = if (language == AppLanguage.EN) "Location Properties" else "Lokacijos savybės",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+
+                        var locTypeExpanded by remember { mutableStateOf(false) }
+                        val currentLocTypeObj = LocationType.fromName(selectedLocationType ?: "")
+                        val currentLocTypeLabel = if (language == AppLanguage.EN) {
+                            currentLocTypeObj?.enName ?: (selectedLocationType ?: "Select Location Type...")
+                        } else {
+                            currentLocTypeObj?.ltName ?: (selectedLocationType ?: "Pasirinkite lokacijos tipą...")
+                        }
+
+                        ExposedDropdownMenuBox(
+                            expanded = locTypeExpanded,
+                            onExpandedChange = { locTypeExpanded = !locTypeExpanded },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            OutlinedTextField(
+                                value = currentLocTypeLabel,
+                                onValueChange = {},
+                                readOnly = true,
+                                label = { Text(if (language == AppLanguage.EN) "Location Type" else "Lokacijos tipas") },
+                                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = locTypeExpanded) },
+                                modifier = Modifier.menuAnchor().fillMaxWidth()
+                            )
+                            ExposedDropdownMenu(
+                                expanded = locTypeExpanded,
+                                onDismissRequest = { locTypeExpanded = false }
+                            ) {
+                                LocationType.entries.forEach { lt ->
+                                    DropdownMenuItem(
+                                        text = { 
+                                            val txt = if (language == AppLanguage.EN) "${lt.enName} (${lt.ltName})" else "${lt.ltName} (${lt.enName})"
+                                            Text(txt)
+                                        },
+                                        onClick = {
+                                            selectedLocationType = lt.name
+                                            locTypeExpanded = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+
+                        // Assigned Products
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = if (language == AppLanguage.EN) "Assigned Products (${selectedProductIds.size})" else "Priskirtos prekės (${selectedProductIds.size})",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Button(
+                                onClick = { showAddProductDialog = true },
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                            ) {
+                                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text(if (language == AppLanguage.EN) "Add Product" else "Pridėti prekę")
+                            }
+                        }
+
+                        if (selectedProductIds.isEmpty()) {
+                            Text(
+                                text = if (language == AppLanguage.EN) "No products assigned to this location yet." else "Šiai lokacijai dar nepriskirta jokių prekių.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        } else {
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                selectedProductIds.forEach { prodId ->
+                                    val prod = allProductsCatalog.find { it.id == prodId }
+                                    Surface(
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = MaterialTheme.colorScheme.background,
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(
+                                                    text = prod?.name ?: "Prekė #$prodId",
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    fontWeight = FontWeight.SemiBold
+                                                )
+                                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                    Text("ID: $prodId", style = MaterialTheme.typography.labelSmall)
+                                                    if (!prod?.code.isNullOrBlank()) Text("Kodas: ${prod?.code}", style = MaterialTheme.typography.labelSmall)
+                                                    if (!prod?.barcode.isNullOrBlank()) Text("BC: ${prod?.barcode}", style = MaterialTheme.typography.labelSmall)
+                                                }
+                                            }
+                                            IconButton(
+                                                onClick = { selectedProductIds.remove(prodId) },
+                                                modifier = Modifier.size(32.dp)
+                                            ) {
+                                                Icon(Icons.Default.Delete, contentDescription = "Pašalinti", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp))
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -3236,7 +3574,10 @@ internal fun TypeEditorDialog(
                                 isCompany = if (typeStr == "PartnerSv") isCompany else null,
                                 baseUnit = if (typeStr == "ProductSv" || typeStr == "ServiceSv") baseUnit.takeIf { it.isNotBlank() } else null,
                                 baseUnitId = if (typeStr == "UnitSv") baseUnitId else null,
-                                conversionFactor = if (typeStr == "UnitSv") conversionFactor.toDoubleOrNull() ?: 1.0 else null
+                                conversionFactor = if (typeStr == "UnitSv") conversionFactor.toIntOrNull() ?: 1 else null,
+                                locations = if (typeStr == "StorageSv" || typeStr == "WarehouseSv") selectedLocationIds.toList() else null,
+                                products = if (typeStr == "LocationSv") selectedProductIds.toList() else null,
+                                locationType = if (typeStr == "LocationSv") selectedLocationType else null
                             ),
                             checkedChildren.toList()
                         )
@@ -3330,6 +3671,367 @@ internal fun TypeEditorDialog(
                     } else if (res is com.suprogramuota_visata.api.domain.util.ApiResult.Error) {
                         nestedErrorMessage = res.message
                     }
+                }
+            }
+        )
+    }
+
+    if (showAddLocationDialog) {
+        var searchQuery by remember { mutableStateOf("") }
+        var isCreateTab by remember { mutableStateOf(false) }
+        var newLocName by remember { mutableStateOf("") }
+        var newLocCode by remember { mutableStateOf("") }
+        var newLocBarcode by remember { mutableStateOf("") }
+        var newLocType by remember { mutableStateOf<String?>(null) }
+        var newLocTypeExpanded by remember { mutableStateOf(false) }
+        var isCreating by remember { mutableStateOf(false) }
+
+        val filteredLocations = remember(allLocationsCatalog, searchQuery, selectedLocationIds.toList()) {
+            allLocationsCatalog.filter { loc ->
+                val id = loc.id ?: return@filter false
+                if (selectedLocationIds.contains(id)) return@filter false
+                if (searchQuery.isBlank()) return@filter true
+                loc.name.contains(searchQuery, ignoreCase = true) ||
+                    (loc.code?.contains(searchQuery, ignoreCase = true) == true) ||
+                    (loc.barcode?.contains(searchQuery, ignoreCase = true) == true) ||
+                    id.toString().contains(searchQuery)
+            }
+        }
+
+        AlertDialog(
+            onDismissRequest = { showAddLocationDialog = false },
+            title = {
+                Text(
+                    text = if (language == AppLanguage.EN) "Add Location to Storage" else "Pridėti lokaciją į saugyklą",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Column(modifier = Modifier.fillMaxWidth().heightIn(max = 480.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(
+                            selected = !isCreateTab,
+                            onClick = { isCreateTab = false },
+                            label = { Text(if (language == AppLanguage.EN) "Select Existing" else "Pasirinkti esamą") }
+                        )
+                        FilterChip(
+                            selected = isCreateTab,
+                            onClick = { isCreateTab = true },
+                            label = { Text(if (language == AppLanguage.EN) "Create New" else "Sukurti naują") }
+                        )
+                    }
+
+                    if (!isCreateTab) {
+                        OutlinedTextField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            label = { Text(if (language == AppLanguage.EN) "Search locations..." else "Ieškoti lokacijų...") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true
+                        )
+
+                        if (filteredLocations.isEmpty()) {
+                            Box(modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp), contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = if (language == AppLanguage.EN) "No matching locations available" else "Nėra tinkamų lokacijų",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        } else {
+                            LazyColumn(modifier = Modifier.fillMaxWidth().weight(1f, fill = false), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                items(filteredLocations) { loc ->
+                                    val locId = loc.id ?: return@items
+                                    Surface(
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(loc.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                    Text("ID: $locId", style = MaterialTheme.typography.labelSmall)
+                                                    if (!loc.code.isNullOrBlank()) Text("Kodas: ${loc.code}", style = MaterialTheme.typography.labelSmall)
+                                                    if (!loc.barcode.isNullOrBlank()) Text("BC: ${loc.barcode}", style = MaterialTheme.typography.labelSmall)
+                                                    if (!loc.locationType.isNullOrBlank()) {
+                                                        val ltObj = LocationType.fromName(loc.locationType ?: "")
+                                                        val ltName = if (language == AppLanguage.EN) (ltObj?.enName ?: loc.locationType) else (ltObj?.ltName ?: loc.locationType)
+                                                        Text("[$ltName]", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                                                    }
+                                                }
+                                            }
+                                            Button(
+                                                onClick = {
+                                                    selectedLocationIds.add(locId)
+                                                },
+                                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                                            ) {
+                                                Text(if (language == AppLanguage.EN) "Add" else "Pridėti")
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        OutlinedTextField(
+                            value = newLocName,
+                            onValueChange = { newLocName = it },
+                            label = { Text(if (language == AppLanguage.EN) "Location Name *" else "Lokacijos pavadinimas *") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true
+                        )
+                        OutlinedTextField(
+                            value = newLocCode,
+                            onValueChange = { newLocCode = it },
+                            label = { Text(if (language == AppLanguage.EN) "Code" else "Kodas") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true
+                        )
+                        OutlinedTextField(
+                            value = newLocBarcode,
+                            onValueChange = { newLocBarcode = it },
+                            label = { Text(if (language == AppLanguage.EN) "Barcode" else "Brūkšninis kodas") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true
+                        )
+
+                        val newLtObj = LocationType.fromName(newLocType ?: "")
+                        val newLtLabel = if (language == AppLanguage.EN) {
+                            newLtObj?.enName ?: (newLocType ?: "Select Location Type...")
+                        } else {
+                            newLtObj?.ltName ?: (newLocType ?: "Pasirinkite lokacijos tipą...")
+                        }
+
+                        ExposedDropdownMenuBox(
+                            expanded = newLocTypeExpanded,
+                            onExpandedChange = { newLocTypeExpanded = !newLocTypeExpanded },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            OutlinedTextField(
+                                value = newLtLabel,
+                                onValueChange = {},
+                                readOnly = true,
+                                label = { Text(if (language == AppLanguage.EN) "Location Type" else "Lokacijos tipas") },
+                                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = newLocTypeExpanded) },
+                                modifier = Modifier.menuAnchor().fillMaxWidth()
+                            )
+                            ExposedDropdownMenu(
+                                expanded = newLocTypeExpanded,
+                                onDismissRequest = { newLocTypeExpanded = false }
+                            ) {
+                                LocationType.entries.forEach { lt ->
+                                    DropdownMenuItem(
+                                        text = {
+                                            val txt = if (language == AppLanguage.EN) "${lt.enName} (${lt.ltName})" else "${lt.ltName} (${lt.enName})"
+                                            Text(txt)
+                                        },
+                                        onClick = {
+                                            newLocType = lt.name
+                                            newLocTypeExpanded = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+
+                        Button(
+                            onClick = {
+                                if (newLocName.isNotBlank() && !isCreating) {
+                                    isCreating = true
+                                    scope.launch {
+                                        val newDto = TypeDTO(
+                                            type = "LocationSv",
+                                            name = newLocName.trim(),
+                                            code = newLocCode.trim().takeIf { it.isNotBlank() },
+                                            barcode = newLocBarcode.trim().takeIf { it.isNotBlank() },
+                                            locationType = newLocType,
+                                            enabled = true
+                                        )
+                                        val res = apiClient.typeRepository.create(newDto)
+                                        if (res is com.suprogramuota_visata.api.domain.util.ApiResult.Success && res.data != null) {
+                                            val created = res.data!!
+                                            allLocationsCatalog = allLocationsCatalog + created
+                                            created.id?.let { selectedLocationIds.add(it) }
+                                            showAddLocationDialog = false
+                                        }
+                                        isCreating = false
+                                    }
+                                }
+                            },
+                            enabled = newLocName.isNotBlank() && !isCreating,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(if (language == AppLanguage.EN) "Create & Add Location" else "Sukurti ir pridėti lokaciją")
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showAddLocationDialog = false }) {
+                    Text(if (language == AppLanguage.EN) "Done" else "Atlikta")
+                }
+            }
+        )
+    }
+
+    if (showAddProductDialog) {
+        var searchQuery by remember { mutableStateOf("") }
+        var isCreateTab by remember { mutableStateOf(false) }
+        var newProdName by remember { mutableStateOf("") }
+        var newProdCode by remember { mutableStateOf("") }
+        var newProdBarcode by remember { mutableStateOf("") }
+        var isCreating by remember { mutableStateOf(false) }
+
+        val filteredProducts = remember(allProductsCatalog, searchQuery, selectedProductIds.toList()) {
+            allProductsCatalog.filter { prod ->
+                val id = prod.id ?: return@filter false
+                if (selectedProductIds.contains(id)) return@filter false
+                if (searchQuery.isBlank()) return@filter true
+                prod.name.contains(searchQuery, ignoreCase = true) ||
+                    (prod.code?.contains(searchQuery, ignoreCase = true) == true) ||
+                    (prod.barcode?.contains(searchQuery, ignoreCase = true) == true) ||
+                    id.toString().contains(searchQuery)
+            }
+        }
+
+        AlertDialog(
+            onDismissRequest = { showAddProductDialog = false },
+            title = {
+                Text(
+                    text = if (language == AppLanguage.EN) "Add Product to Location" else "Pridėti prekę į lokaciją",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Column(modifier = Modifier.fillMaxWidth().heightIn(max = 480.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(
+                            selected = !isCreateTab,
+                            onClick = { isCreateTab = false },
+                            label = { Text(if (language == AppLanguage.EN) "Select Existing" else "Pasirinkti esamą") }
+                        )
+                        FilterChip(
+                            selected = isCreateTab,
+                            onClick = { isCreateTab = true },
+                            label = { Text(if (language == AppLanguage.EN) "Create New" else "Sukurti naują") }
+                        )
+                    }
+
+                    if (!isCreateTab) {
+                        OutlinedTextField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            label = { Text(if (language == AppLanguage.EN) "Search products..." else "Ieškoti prekių...") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true
+                        )
+
+                        if (filteredProducts.isEmpty()) {
+                            Box(modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp), contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = if (language == AppLanguage.EN) "No matching products available" else "Nėra tinkamų prekių",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        } else {
+                            LazyColumn(modifier = Modifier.fillMaxWidth().weight(1f, fill = false), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                items(filteredProducts) { prod ->
+                                    val prodId = prod.id ?: return@items
+                                    Surface(
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(prod.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                    Text("ID: $prodId", style = MaterialTheme.typography.labelSmall)
+                                                    if (!prod.code.isNullOrBlank()) Text("Kodas: ${prod.code}", style = MaterialTheme.typography.labelSmall)
+                                                    if (!prod.barcode.isNullOrBlank()) Text("BC: ${prod.barcode}", style = MaterialTheme.typography.labelSmall)
+                                                }
+                                            }
+                                            Button(
+                                                onClick = {
+                                                    selectedProductIds.add(prodId)
+                                                },
+                                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                                            ) {
+                                                Text(if (language == AppLanguage.EN) "Add" else "Pridėti")
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        OutlinedTextField(
+                            value = newProdName,
+                            onValueChange = { newProdName = it },
+                            label = { Text(if (language == AppLanguage.EN) "Product Name *" else "Prekės pavadinimas *") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true
+                        )
+                        OutlinedTextField(
+                            value = newProdCode,
+                            onValueChange = { newProdCode = it },
+                            label = { Text(if (language == AppLanguage.EN) "Code" else "Kodas") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true
+                        )
+                        OutlinedTextField(
+                            value = newProdBarcode,
+                            onValueChange = { newProdBarcode = it },
+                            label = { Text(if (language == AppLanguage.EN) "Barcode" else "Brūkšninis kodas") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true
+                        )
+
+                        Button(
+                            onClick = {
+                                if (newProdName.isNotBlank() && !isCreating) {
+                                    isCreating = true
+                                    scope.launch {
+                                        val newDto = TypeDTO(
+                                            type = "ProductSv",
+                                            name = newProdName.trim(),
+                                            code = newProdCode.trim().takeIf { it.isNotBlank() },
+                                            barcode = newProdBarcode.trim().takeIf { it.isNotBlank() },
+                                            enabled = true
+                                        )
+                                        val res = apiClient.typeRepository.create(newDto)
+                                        if (res is com.suprogramuota_visata.api.domain.util.ApiResult.Success && res.data != null) {
+                                            val created = res.data!!
+                                            allProductsCatalog = allProductsCatalog + created
+                                            created.id?.let { selectedProductIds.add(it) }
+                                            showAddProductDialog = false
+                                        }
+                                        isCreating = false
+                                    }
+                                }
+                            },
+                            enabled = newProdName.isNotBlank() && !isCreating,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(if (language == AppLanguage.EN) "Create & Add Product" else "Sukurti ir pridėti prekę")
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showAddProductDialog = false }) {
+                    Text(if (language == AppLanguage.EN) "Done" else "Atlikta")
                 }
             }
         )
